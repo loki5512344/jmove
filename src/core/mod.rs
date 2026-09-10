@@ -43,7 +43,7 @@ pub type JmoveResult<T> = Result<T, JmoveError>;
 /// # Examples
 ///
 /// ```
-/// use std::path::Path;
+/// use std::path::{Path, PathBuf};
 /// use jmove::core::normalize_rel_path;
 ///
 /// assert_eq!(
@@ -59,9 +59,8 @@ pub fn normalize_rel_path(path: &Path) -> Option<PathBuf> {
         match comp {
             Component::CurDir => {}
             Component::ParentDir => {
-                if stack.pop().is_none() {
-                    return None; // would escape the project root
-                }
+                // `?` on the popped Option: escaping the root yields None.
+                stack.pop()?;
             }
             Component::Normal(piece) => stack.push(piece),
             // Absolute paths and Windows prefixes are not project-relative.

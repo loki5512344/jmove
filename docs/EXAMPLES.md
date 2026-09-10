@@ -1,0 +1,173 @@
+# jmove — examples
+
+Concrete examples for both audiences: humans at a terminal and AI agents
+consuming `--json`. All outputs below are captured from the real binary.
+
+Flags (see `jmove --help`): `mv <source> <target> [--dry-run] [--json]`,
+`check [--json]`, and the global `--root <DIR>`. Paths may be relative to
+the root or absolute inside it; `.gitignore`d files are never indexed.
+Exit codes: `0` ok · `1` operation error · `2` `check` found broken imports.
+
+## Human usage
+
+### Preview a move (always do this first)
+
+```console
+$ jmove mv lib/sum.ts utils/sum.ts --dry-run
+--- app.ts
++++ app.ts
+@@ -1,4 +1,4 @@
+-import { sum } from "./lib/sum";
++import { sum } from "./utils/sum";
+
+ export function main(): number {
+   return sum(1, 2);
+move lib/sum.ts -> utils/sum.ts
+```
+
+Nothing on disk changed. If no file imports the source, the diff is empty.
+
+### Apply the move
+
+```console
+$ jmove mv lib/sum.ts utils/sum.ts
+moved lib/sum.ts -> utils/sum.ts, updated 1 import in 1 file
+```
+
+Rewrites happen first, the rename last; any failure rolls everything back.
+
+### Verify the project afterwards
+
+```console
+$ jmove check
+check: no broken imports found
+```
+
+When something does point at nothing, `check` prints one line per broken
+import and exits with code `2`:
+
+```console
+$ jmove check
+src/broken.ts:4: cannot resolve './gone'
+$ echo $?
+2
+```
+
+### Operating on another project
+
+`--root` points jmove at a project other than the current directory; all
+path arguments stay relative to that root:
+
+```console
+$ jmove --root ~/code/frontend mv src/old.ts src/new.ts --dry-run
+```
+
+### Errors
+
+```console
+$ jmove mv lib/sum.ts app.ts
+jmove: target path 'app.ts' already exists
+  hint: remove or rename the existing target first
+$ echo $?
+1
+```
+
+jmove never overwrites: free the destination (or pick another name) and
+retry. A missing source reports `SOURCE_NOT_FOUND` the same way, and a
+file nobody imports simply moves with zero rewrites.
+
+## AI-agent usage (`--json`)
+
+Every `--json` response is a flat envelope: `status` (`"ok"` | `"dry_run"`
+| `"error"`) and `operation` plus the payload fields. Errors carry a
+stable `code` and an actionable `hint`.
+
+### 1. Preview
+
+```console
+$ jmove mv lib/sum.ts utils/sum.ts --dry-run --json
+{
+  "status": "dry_run",
+  "operation": "mv",
+  "would_move": "lib/sum.ts",
+  "target": "utils/sum.ts",
+  "would_update": 1,
+  "affected_files": [
+    "app.ts"
+  ],
+  "diff": "--- app.ts\n+++ app.ts\n@@ -1,4 +1,4 @@\n-import { sum } from \"./lib/sum\";\n+import { sum } from \"./utils/sum\";\n..."
+}
+```
+
+Review `affected_files`; abort and ask the user if the blast radius is
+unexpected.
+
+### 2. Apply
+
+```console
+$ jmove mv lib/sum.ts utils/sum.ts --json
+{
+  "status": "ok",
+  "operation": "mv",
+  "source": "lib/sum.ts",
+  "target": "utils/sum.ts",
+  "changed_files": [
+    {
+      "path": "app.ts",
+      "changes": [
+        {
+          "line": 1,
+          "old": "./lib/sum",
+          "new": "./utils/sum"
+        }
+      ]
+    }
+  ],
+  "moved": 1,
+  "updated_imports": 1
+}
+```
+
+`changed_files[].changes[]` lists every rewritten specifier with its
+1-based line; `moved` and `updated_imports` are the counters.
+
+### 3. Verify
+
+```console
+$ jmove check --json
+{
+  "status": "ok",
+  "operation": "check",
+  "broken_imports": [
+    {
+      "file": "src/broken.ts",
+      "line": 4,
+      "import": "./gone",
+      "reason": "file_not_found"
+    }
+  ],
+  "total": 1
+}
+```
+
+Note: this response keeps `status: "ok"` (the command itself succeeded)
+while the process exits `2`; treat a non-zero `total` — or exit code `2` —
+as a failed refactor. A clean project returns `"broken_imports": [], "total": 0`
+and exit code `0`.
+
+### Error shape
+
+```console
+$ jmove mv lib/sum.ts app.ts --json
+{
+  "status": "error",
+  "operation": "mv",
+  "code": "TARGET_EXISTS",
+  "message": "target path 'app.ts' already exists",
+  "hint": "remove or rename the existing target first"
+}
+```
+
+Stable codes: `TARGET_EXISTS`, `SOURCE_NOT_FOUND`, `INVALID_ARGUMENT`,
+`IO_ERROR`, `STALE_INDEX`, `PLAN_REJECTED` (exit `1`). The recommended
+agent loop — preview, inspect, apply, verify — is in `docs/SKILL.md`.

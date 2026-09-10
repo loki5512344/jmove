@@ -17,10 +17,12 @@ JavaScript; Java/Python/Go on the roadmap. Single binary, no LSP needed.
 ### mv — move a file and rewrite its importers
 
 ```
-jmove mv <source> <target> [--root DIR] [--dry-run] [--json] [--force]
+jmove mv <source> <target> [--root DIR] [--dry-run] [--json]
 ```
 
 Always run `--dry-run` first and confirm the change set looks right.
+Moving onto an existing path fails with `TARGET_EXISTS` — choose another
+target (Phase 1 has no overwrite mode).
 
 ### check — find broken imports
 
@@ -54,6 +56,5 @@ and a `hint` describing the next action. On success, `mv` reports
 ## Rules of use
 
 - Never run `mv` without a prior `--dry-run` in the same session.
-- Never pass `--force` unless the user explicitly authorized overwriting.
 - After every successful `mv`, run `check`; treat exit code `2` as
   a failed refactor.

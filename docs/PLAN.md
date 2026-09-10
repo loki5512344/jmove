@@ -52,7 +52,7 @@ Existing tools ship a raw `.agents/skills/` folder; we do it properly:
 - `--json` on every command. Envelope:
   `{ "status": "ok" | "dry_run" | "error", "operation": "...", ... }`
 - Stable error codes + actionable hints:
-  `{ "status":"error", "code":"TARGET_EXISTS", "message":"...", "hint":"Use --force or choose another target" }`
+  `{ "status":"error", "code":"TARGET_EXISTS", "message":"...", "hint":"choose another target or remove the existing one" }`
 - `mv --dry-run --json` → `{ would_move, would_update, affected_files }`
   so agents preview → confirm → apply → `check --json`.
 - Exit codes: `0` ok · `1` error · `2` broken imports (from `check`).
