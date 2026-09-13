@@ -32,10 +32,10 @@
 - [x] docs/EXAMPLES.md — примеры для людей и агентов
 
 ## Phase 1.5 — Java (наша ниша, аналогов в CLI нет)
-- [ ] tree-sitter Java грамматика: package + import extraction
-- [ ] Детект source root (src/main/java, src/) и соответствие package ⇄ директория
-- [ ] mv = три синхронных правки: package, все import в проекту, физический перенос
-- [ ] e2e фикстуры tests/java/
+- [x] tree-sitter Java грамматика: package + import extraction
+- [x] Детект source root (src/main/java, src/) и соответствие package ⇄ директория
+- [x] mv = три синхронных правки: package, все import в проекту, физический перенос
+- [x] e2e фикстуры tests/java/
 
 ## Phase 2
 - [ ] Кэш индекса на диске (bincode/rkyv) → .jmove/index

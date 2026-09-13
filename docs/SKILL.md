@@ -4,7 +4,8 @@
 
 Moves or renames source files inside a project and updates every import
 statement referencing them. Never breaks imports. Supported: TypeScript,
-JavaScript; Java/Python/Go on the roadmap. Single binary, no LSP needed.
+JavaScript, Java (package declaration + all importers + the file move are
+kept in sync); Python/Go on the roadmap. Single binary, no LSP needed.
 
 ## When to use
 
@@ -31,6 +32,20 @@ jmove check [--root DIR] [--json]
 ```
 
 Run after any move (or any edit) to validate project consistency.
+
+## Java specifics
+
+- Moving a `.java` file rewrites three coordinated edits: its own
+  `package` declaration, every `import <fqn>` naming the class (static
+  member imports keep their member suffix) and the physical move.
+- The target must be a `.java` path under the same source root
+  (`src/main/java`, `src`, …) and its directory maps to the new package.
+  Anything else exits `1` with code `PLAN_REJECTED`.
+- A class in the default package (no `package` declaration) can only be
+  renamed inside its directory.
+- `check` never reports unresolved Java imports (jdk, third-party,
+  `pkg.*`) as broken — they are external by design, like TS bare
+  specifiers.
 
 ## Recommended agent workflow
 

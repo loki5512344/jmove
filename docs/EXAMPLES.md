@@ -76,6 +76,33 @@ jmove never overwrites: free the destination (or pick another name) and
 retry. A missing source reports `SOURCE_NOT_FOUND` the same way, and a
 file nobody imports simply moves with zero rewrites.
 
+### Java: package + imports + move in one step
+
+Java couples the `package` declaration to the directory layout, so a move
+is three coordinated edits — jmove makes all of them:
+
+```console
+$ jmove mv src/main/java/com/example/util/Text.java src/main/java/com/example/core/Text.java --dry-run
+--- src/main/java/com/example/app/App.java
++++ src/main/java/com/example/app/App.java
+@@ -1,7 +1,7 @@
+ package com.example.app;
+
+-import com.example.util.Text;
+-import static com.example.util.Text.shout;
++import com.example.core.Text;
++import static com.example.core.Text.shout;
+...
+move src/main/java/com/example/util/Text.java -> src/main/java/com/example/core/Text.java
+$ jmove mv src/main/java/com/example/util/Text.java src/main/java/com/example/core/Text.java
+moved src/main/java/com/example/util/Text.java -> src/main/java/com/example/core/Text.java, updated 4 imports in 3 files
+```
+
+The `3 files` include the moved file itself: its `package` line is the
+fourth rewrite. Targets outside the source root, non-`.java` targets and
+cross-directory moves of default-package classes are rejected with
+`PLAN_REJECTED` (exit 1) and change nothing.
+
 ## AI-agent usage (`--json`)
 
 Every `--json` response is a flat envelope: `status` (`"ok"` | `"dry_run"`

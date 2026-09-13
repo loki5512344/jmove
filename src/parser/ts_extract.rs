@@ -60,13 +60,13 @@ fn visit(node: Node, source: &str, out: &mut Vec<ImportRecord>) {
 }
 
 /// Grammar for a language variant. The TypeScript grammar also parses
-/// plain JavaScript; only JSX needs the TSX variant.
+/// plain JavaScript; only JSX needs the TSX variant. Java never reaches
+/// this frontend ([`crate::parser::frontend_for`] routes it to
+/// [`crate::parser::java`]), so everything else maps to plain TypeScript.
 fn grammar(lang: SourceLanguage) -> Language {
     match lang {
         SourceLanguage::Tsx => tree_sitter_typescript::LANGUAGE_TSX.into(),
-        SourceLanguage::TypeScript | SourceLanguage::JavaScript => {
-            tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into()
-        }
+        _ => tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into(),
     }
 }
 

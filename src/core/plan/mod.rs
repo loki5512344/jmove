@@ -2,9 +2,12 @@
 //!
 //! A plan is pure data (no disk writes), so dry-run and `--json` can render
 //! it without touching the filesystem. Specifier arithmetic lives in
-//! [`specifier`].
+//! [`specifier`]; the Java package/directory flavour in [`java`].
 
+mod java;
 mod specifier;
+#[cfg(test)]
+pub(crate) mod tests_support;
 
 pub use specifier::relative_specifier;
 
@@ -13,6 +16,7 @@ use std::path::{Path, PathBuf};
 
 use crate::core::index::Index;
 use crate::core::{JmoveError, JmoveResult, normalize_rel_path};
+use crate::parser::SourceLanguage;
 
 /// One in-file replacement of an import specifier. Only the specifier text
 /// between the quotes is touched — the statement layout is never reformatted.
@@ -41,10 +45,11 @@ pub struct MovePlan {
 
 /// Compute the rewrite plan for `source -> target`.
 ///
-/// Every indexed import whose resolved target equals `source` gets a new
-/// relative specifier from the importer's directory to `target` (see
-/// [`relative_specifier`]). Rewrites whose result equals the old specifier
-/// are dropped; the result is sorted by (file, span).
+/// TS/JS: every indexed import whose resolved target equals `source` gets a
+/// new relative specifier from the importer's directory to `target` (see
+/// [`relative_specifier`]). Java moves additionally rewrite the moved file's
+/// `package` declaration (see [`java`]). Rewrites whose result equals the
+/// old specifier are dropped; the result is sorted by (file, span).
 pub fn plan_move(index: &Index, source: &Path, target: &Path) -> JmoveResult<MovePlan> {
     let rel = |label: &str, p: &Path| match normalize_rel_path(p) {
         Some(r) => Ok(r),
@@ -72,13 +77,27 @@ pub fn plan_move(index: &Index, source: &Path, target: &Path) -> JmoveResult<Mov
         )));
     }
 
+    let rewrites = if SourceLanguage::for_path(&source) == Some(SourceLanguage::Java) {
+        java::java_rewrites(index, &source, &target)?
+    } else {
+        ts_rewrites(index, &source, &target)
+    };
+    Ok(MovePlan {
+        source,
+        target,
+        rewrites,
+    })
+}
+
+// Relative-specifier rewrites for the TS/JS flavour of the graph.
+fn ts_rewrites(index: &Index, source: &Path, target: &Path) -> Vec<Rewrite> {
     let mut rewrites = Vec::new();
-    for importer in index.importers_of(&source) {
+    for importer in index.importers_of(source) {
         let edges = index.imports[&importer]
             .iter()
-            .filter(|e| e.target.as_deref() == Some(source.as_path()));
+            .filter(|e| e.target.as_deref() == Some(source));
         for edge in edges {
-            let new_text = relative_specifier(&importer, &target);
+            let new_text = relative_specifier(&importer, target);
             if new_text == edge.record.specifier {
                 continue; // no-op rewrite, never reaches the plan
             }
@@ -92,11 +111,7 @@ pub fn plan_move(index: &Index, source: &Path, target: &Path) -> JmoveResult<Mov
         }
     }
     rewrites.sort_by_key(|r| (r.file.clone(), r.span.start));
-    Ok(MovePlan {
-        source,
-        target,
-        rewrites,
-    })
+    rewrites
 }
 
 #[cfg(test)]
@@ -104,22 +119,8 @@ mod tests {
     use super::{Rewrite, plan_move};
     use crate::core::JmoveError;
     use crate::core::index::{Index, ResolvedImport};
-    use crate::parser::ImportRecord;
-    use std::ops::Range;
+    use crate::core::plan::tests_support::edge;
     use std::path::{Path, PathBuf};
-
-    // Hand-wired edges: planner tests never touch the parser.
-    fn edge(spec: &str, span: Range<usize>, target: &str) -> ResolvedImport {
-        let record = ImportRecord {
-            specifier: spec.into(),
-            span,
-            is_dynamic: false,
-        };
-        ResolvedImport {
-            record,
-            target: Some(target.into()),
-        }
-    }
 
     fn index_with(files: &[&str], imports: &[(&str, Vec<ResolvedImport>)]) -> Index {
         let mut ix = Index::default();

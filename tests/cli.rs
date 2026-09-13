@@ -1,71 +1,19 @@
 //! End-to-end tests for the `jmove` CLI against the TypeScript fixtures.
-//!
-//! Each test copies a fixture tree into a fresh tempdir, runs the real
-//! binary with `--root <tmp>` and asserts on exit codes, stdout/stderr and
-//! the resulting files on disk.
 
-use std::fs;
-use std::path::{Path, PathBuf};
+mod common;
 
-use assert_cmd::Command;
-use assert_cmd::assert::Assert;
+use common::{copy_fixture, fixture_dir, in_root, jmove, read};
 use predicates::prelude::*;
 use tempfile::TempDir;
 
-/// Recursively copy `tests/typescript/<name>` into a tempdir and return it.
-///
-/// An empty `.git` marker is created in the copy: the `ignore` crate only
-/// applies `.gitignore` rules inside a git repository by default, and the
-/// `normal` fixture relies on its `node_modules/` rule being effective.
-fn copy_fixture(name: &str) -> TempDir {
-    let tmp = TempDir::new().expect("tempdir");
-    let from = fixture_dir(name);
-    copy_dir(&from, tmp.path());
-    fs::create_dir(tmp.path().join(".git")).expect("git marker");
-    tmp
-}
-
-/// Source path of a TypeScript fixture tree inside the repository.
-fn fixture_dir(name: &str) -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("tests/typescript")
-        .join(name)
-}
-
-/// Recursive file/dir copy; plain `std::fs` only, no symlinks in fixtures.
-fn copy_dir(from: &Path, to: &Path) {
-    fs::create_dir_all(to).expect("create dir");
-    for entry in fs::read_dir(from).expect("read dir") {
-        let entry = entry.expect("entry");
-        let target = to.join(entry.file_name());
-        if entry.file_type().expect("file type").is_dir() {
-            copy_dir(&entry.path(), &target);
-        } else {
-            fs::copy(entry.path(), target).expect("copy file");
-        }
-    }
-}
-
-/// Run `jmove --root <dir> <args…>` and return an assertable outcome.
-fn jmove(root: &TempDir, args: &[&str]) -> Assert {
-    let mut cmd = Command::cargo_bin("jmove").expect("jmove binary");
-    cmd.arg("--root").arg(root.path()).args(args);
-    cmd.assert()
-}
-
-/// Read `path` as a string, panicking with the path on failure.
-fn read(path: &Path) -> String {
-    fs::read_to_string(path).unwrap_or_else(|err| panic!("read {}: {err}", path.display()))
-}
-
-/// Build a path inside the tempdir root from a `/`-separated relative path.
-fn in_root(root: &Path, rel: &str) -> PathBuf {
-    root.join(rel)
+/// Convenience wrapper: a TypeScript fixture by name.
+fn fixture(name: &str) -> TempDir {
+    copy_fixture("typescript", name)
 }
 
 #[test]
 fn mv_dry_run_prints_diff_and_leaves_disk_untouched() {
-    let tmp = copy_fixture("basic");
+    let tmp = fixture("basic");
     jmove(&tmp, &["mv", "lib/sum.ts", "utils/sum.ts", "--dry-run"])
         .success()
         .stdout(predicate::str::contains("./lib/sum"))
@@ -80,14 +28,14 @@ fn mv_dry_run_prints_diff_and_leaves_disk_untouched() {
     );
     assert_eq!(
         read(&in_root(tmp.path(), "app.ts")),
-        read(&fixture_dir("basic").join("app.ts")),
+        read(&fixture_dir("typescript", "basic").join("app.ts")),
         "importer untouched"
     );
 }
 
 #[test]
 fn mv_rewrites_importer_and_moves_the_file() {
-    let tmp = copy_fixture("basic");
+    let tmp = fixture("basic");
     jmove(&tmp, &["mv", "lib/sum.ts", "utils/sum.ts"])
         .success()
         .stdout(predicate::str::contains("moved lib/sum.ts -> utils/sum.ts"))
@@ -109,7 +57,7 @@ fn mv_rewrites_importer_and_moves_the_file() {
 
 #[test]
 fn mv_updates_barrel_and_never_touches_node_modules() {
-    let tmp = copy_fixture("normal");
+    let tmp = fixture("normal");
     jmove(&tmp, &["mv", "src/impl/core.ts", "src/impl/calc.ts"]).success();
     assert!(
         read(&in_root(tmp.path(), "src/impl/index.ts")).contains("./calc"),
@@ -128,7 +76,7 @@ fn mv_updates_barrel_and_never_touches_node_modules() {
 
 #[test]
 fn mv_rewrites_only_the_specifier_line_in_multi_line_imports() {
-    let tmp = copy_fixture("complex");
+    let tmp = fixture("complex");
     let view = in_root(tmp.path(), "src/ui/deep/nested/view.ts");
     let before: Vec<String> = read(&view).lines().map(str::to_owned).collect();
 
@@ -154,12 +102,12 @@ fn mv_rewrites_only_the_specifier_line_in_multi_line_imports() {
 
 #[test]
 fn check_passes_on_clean_and_fails_on_broken_fixture() {
-    let clean = copy_fixture("basic");
+    let clean = fixture("basic");
     jmove(&clean, &["check"])
         .success()
         .stdout(predicate::str::contains("no broken imports"));
 
-    let messy = copy_fixture("complex");
+    let messy = fixture("complex");
     jmove(&messy, &["check"])
         .code(2)
         .stdout(predicate::str::contains(
@@ -169,7 +117,7 @@ fn check_passes_on_clean_and_fails_on_broken_fixture() {
 
 #[test]
 fn check_json_reports_broken_import_payload() {
-    let tmp = copy_fixture("complex");
+    let tmp = fixture("complex");
     jmove(&tmp, &["check", "--json"]).code(2).stdout(
         predicate::str::contains("\"status\": \"ok\"")
             .and(predicate::str::contains("\"operation\": \"check\""))
@@ -183,7 +131,7 @@ fn check_json_reports_broken_import_payload() {
 
 #[test]
 fn mv_json_happy_path_reports_changed_files() {
-    let tmp = copy_fixture("basic");
+    let tmp = fixture("basic");
     jmove(&tmp, &["mv", "lib/sum.ts", "utils/sum.ts", "--json"])
         .success()
         .stdout(
@@ -203,7 +151,7 @@ fn mv_json_happy_path_reports_changed_files() {
 
 #[test]
 fn mv_json_dry_run_reports_preview_payload() {
-    let tmp = copy_fixture("basic");
+    let tmp = fixture("basic");
     jmove(
         &tmp,
         &["mv", "lib/sum.ts", "utils/sum.ts", "--dry-run", "--json"],
@@ -224,7 +172,7 @@ fn mv_json_dry_run_reports_preview_payload() {
 
 #[test]
 fn mv_json_reports_target_exists_error_shape() {
-    let tmp = copy_fixture("basic");
+    let tmp = fixture("basic");
     jmove(&tmp, &["mv", "app.ts", "lib/sum.ts", "--json"])
         .code(1)
         .stdout(
@@ -241,7 +189,7 @@ fn mv_json_reports_target_exists_error_shape() {
 
 #[test]
 fn mv_reports_source_not_found() {
-    let tmp = copy_fixture("basic");
+    let tmp = fixture("basic");
     jmove(&tmp, &["mv", "lib/nope.ts", "utils/nope.ts", "--json"])
         .code(1)
         .stdout(predicate::str::contains("\"code\": \"SOURCE_NOT_FOUND\""));

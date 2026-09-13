@@ -1,4 +1,4 @@
-//! `jmove` — a project-aware file mover for TypeScript/JavaScript.
+//! `jmove` — a project-aware file mover for TypeScript/JavaScript and Java.
 //!
 //! Moving a file inside a project invalidates every relative import that
 //! points at it. `jmove` indexes the project's import graph, computes the
