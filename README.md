@@ -57,9 +57,11 @@ See [docs/EXAMPLES.md](docs/EXAMPLES.md) for more, and
 
 ## Roadmap
 
-TypeScript/JavaScript first, then Java (open niche), Python, Go.
-`split` (automatic file decomposition) is planned — no tool does it.
-Full plan: [docs/PLAN.md](docs/PLAN.md).
+TypeScript/JavaScript and Java (the open niche) are in — real-world tested
+on `google/guava`. Next: a `fix` command reusing the same dry-run/atomic
+engine to auto-repair small breakages (unused/missing/misordered imports),
+then Python, Go. `split` (automatic file decomposition) is planned — no
+tool does it. Full plan: [docs/PLAN.md](docs/PLAN.md).
 
 ## License
 

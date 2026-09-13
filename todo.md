@@ -37,6 +37,42 @@
 - [x] mv = три синхронных правки: package, все import в проекту, физический перенос
 - [x] e2e фикстуры tests/java/
 
+## Phase 1.6 — fix (auto-fix мелких ошибок; тот же safety-движок, что mv)
+Мотивация: jmove уже умеет index → план правок → dry-run diff → atomic apply →
+--json. Превращаем «mv» в обобщённый «найти правки → применить безопасно».
+Слоган: **mv + fix, один движок правок, два генератора планов**.
+Решение: паттерны (вариант 2) — ДА; ML (вариант 1) — НЕТ (детерминизм = продукт:
+dry-run/rollback/error-codes не переживают недетерминированный движок).
+AI оставляем СНАРУЖИ: при неоднозначности jmove отдаёт `candidates` в --json,
+агент (LLM) выбирает и повторяет команду — в рамках нашего agent-first UX.
+- [ ] Edit engine: расширить `rewrite_bytes` с замены span до `Edit{span,new}`
+      (пустой span = вставка; замена на "" + поглощение `\n` = удаление строки);
+      apply/rollback/diff/json трогаются минимально (они уже generic над правками)
+- [ ] `Fix` trait рядом с `Language`: `fixes(source, ctx) -> Vec<FixCandidate>`
+      {rule, severity, auto_fixable, edits}; `jmove fix [--rule ...] [--dry-run] [--json]`
+- [ ] Java v1: unused-imports (skip wildcard/ambiguous), import-order (Checkstyle-подобные группы),
+      missing-import (Type без импорта, ровно 1 кандидат в FQN-индексе → фикс; иначе candidates для агента),
+      class-name-mismatch
+- [ ] TS v1: unused-imports, import-order; add-import требует индекс экспортов (символ→файл)
+- [ ] Форматирование: свой cargo-fmt НЕ строим (вечный long-tail). Только «import formatting»
+      (порядок/группировка — у нас уже есть spans). Опционально `--format-after <cmd>` (prettier /
+      google-java-format), не зависимость
+- [ ] Интероп PMD/Checkstyle/eslint (фаза 2.5): `jmove fix --report checkstyle.xml` маппит
+      violation(file,line,rule) на паттерны; на выход SARIF для CI/IDE.
+      Маркетинг: «auto-fix for what Checkstyle only reports»
+
+## Guava real-world smoke test (google/guava @ main, JDK21, mvnw) — ПРОВЕРЕНО
+- [x] mv Primitives primitives→util: 5 правок (4 imports + package), `mvn -pl guava compile`
+      = BUILD SUCCESS, `jmove check` чисто
+- [x] mv VisibleForTesting annotations→annotations.testing (63 файла): jmove переписал все 62
+      явных импорта корректно, НО javac упал: сам перенесённый файл ссылался на соседний
+      `GwtCompatible` БЕЗ импорта (тот же пакет) → после mv ссылка битая. jmove в v1 осознанно
+      НЕ добавляет импорты. Это главный driver для fix/missing-import из Phase 1.6 выше
+- [ ] (после fix) повторить обе перемещения как `mv` + авто-`fix` и добить compile до SUCCESS
+- [ ] Индексация в monorepo с дублями пакетов (guava vs android/guava в одном --root):
+      FQN-коллизии → class_index оставляет первый по сортировке, импорт резолвится не туда.
+      Нужен выбор/фильтр source root (например `--source-root` или авто-определение по mv-цели)
+
 ## Phase 2
 - [ ] Кэш индекса на диске (bincode/rkyv) → .jmove/index
 - [ ] Инкрементальная переиндексация (только изменённые файлы)
