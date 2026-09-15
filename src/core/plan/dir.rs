@@ -196,7 +196,10 @@ mod tests {
             .collect();
         assert_eq!(
             moves,
-            [("lib/a.ts", "core/lib/a.ts"), ("lib/b.ts", "core/lib/b.ts"),]
+            [
+                ("lib/a.ts".to_string(), "core/lib/a.ts".to_string()),
+                ("lib/b.ts".into(), "core/lib/b.ts".into()),
+            ]
         );
         // app.ts (root) imports both moved modules: two merged specifier
         // edits; deep/c.ts gets its own relative rewrite.
