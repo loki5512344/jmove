@@ -1,0 +1,10 @@
+{
+  // JSONC on purpose: comments and trailing commas must not break loading
+  "compilerOptions": {
+    "baseUrl": "./src",
+    "paths": {
+      "@utils/*": ["utils/*"],
+      "@cfg": ["config.ts"],
+    },
+  },
+}

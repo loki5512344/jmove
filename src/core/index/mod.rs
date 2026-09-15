@@ -9,6 +9,9 @@
 mod files;
 #[cfg(test)]
 mod tests;
+mod tsconfig;
+
+pub use tsconfig::PathAliases;
 
 use std::collections::{BTreeMap, HashMap};
 use std::fs;
@@ -48,6 +51,8 @@ pub struct Index {
     /// FQN → file map for every indexed Java class; the fix rules use it
     /// for candidate lookup (empty when the project has no Java sources).
     pub java_classes: JavaClassIndex,
+    /// tsconfig `compilerOptions.paths` alias table (empty without one).
+    pub aliases: PathAliases,
 }
 
 impl Index {
@@ -64,12 +69,14 @@ impl Index {
     /// collision-free resolution (and therefore `mv`/`fix` rewrites) exact.
     pub fn build_scoped(root: &Path, source_root: Option<&Path>) -> JmoveResult<Self> {
         let root = root.canonicalize()?;
+        let aliases = PathAliases::load(&root);
         let mut index = Self {
             root,
             files: FileSet::default(),
             imports: HashMap::new(),
             packages: HashMap::new(),
             java_classes: JavaClassIndex::default(),
+            aliases,
         };
         index.scan(source_root)?;
         // Resolution needs the complete file set (extension/index guessing)
@@ -82,8 +89,14 @@ impl Index {
                     java_classes
                         .resolve(&resolved.record.specifier)
                         .map(PathBuf::from)
-                } else {
+                } else if resolved.record.specifier.starts_with('.') {
                     resolve_module(importer, &resolved.record.specifier, &index.files)
+                } else {
+                    // Bare specifier: only tsconfig `paths` can map it into
+                    // the project; anything else stays external.
+                    index
+                        .aliases
+                        .resolve(&resolved.record.specifier, &index.files)
                 };
             }
         }

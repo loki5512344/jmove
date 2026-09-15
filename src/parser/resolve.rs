@@ -14,6 +14,10 @@ use crate::core::normalize_rel_path;
 /// Supported extensions, in Node/TS resolution priority order.
 const EXTENSIONS: [&str; 6] = ["ts", "tsx", "js", "jsx", "mjs", "cjs"];
 
+/// Module extension *suffixes*, longest-first: `resolve_base` re-adds them
+/// to a specifier, alias remapping sheds them again (the exact inverse).
+pub const MODULE_EXTS: &[&str] = &[".d.ts", ".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs"];
+
 /// Ambient declaration files: only consulted after every real module
 /// candidate missed (last resort).
 const DECLARATION_EXT: &str = "d.ts";
@@ -45,9 +49,18 @@ pub fn resolve_module(importer: &Path, specifier: &str, files: &FileSet) -> Opti
     // `importer` is project-relative, so `..` segments that walk past the
     // root collapse to `None` here instead of escaping the index.
     let base = normalize_rel_path(&importer.parent()?.join(specifier))?;
-    if files.contains(&base) {
-        return Some(base);
+    resolve_base(&base, files)
+}
+
+/// Resolve a project-relative module base path against the file set:
+/// exact file, extension guessing, then `index.*` in the directory.
+/// Shared by relative specifiers and tsconfig alias mapping.
+#[must_use]
+pub fn resolve_base(base: &Path, files: &FileSet) -> Option<PathBuf> {
+    if files.contains(base) {
+        return Some(base.to_path_buf());
     }
+    let base = base.to_path_buf();
     for ext in EXTENSIONS {
         let candidate = with_ext(&base, ext);
         if files.contains(&candidate) {

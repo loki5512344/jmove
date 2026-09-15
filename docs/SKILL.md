@@ -40,6 +40,13 @@ working tree unstaged either way — stage or commit them yourself.
 `--json` reports the choice as `moved_via` (`"git"`/`"fs"`) and, on a
 dry-run, `would_move_via`.
 
+tsconfig `paths`: `compilerOptions.paths` prefixes (`@/*`, `@cfg` exact
+keys, `baseUrl`-relative) map bare specifiers into the project graph, so
+aliased imports participate in `mv` — the rewrite keeps the alias shape
+while the new file stays inside the mapped tree and falls back to a
+relative specifier otherwise. `extends` chains and 2nd+ candidate lists
+are not followed (v1); an invalid tsconfig silently means "no aliases".
+
 ### check — find broken imports and Java layout errors
 
 ```

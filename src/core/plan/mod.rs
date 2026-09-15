@@ -147,7 +147,13 @@ fn ts_rewrites(index: &Index, source: &Path, target: &Path) -> Vec<Rewrite> {
             .iter()
             .filter(|e| e.target.as_deref() == Some(source));
         for edge in edges {
-            let new_text = relative_specifier(&importer, target);
+            // Aliased imports keep their alias shape when the new location
+            // still round-trips through the same mapping; everything else
+            // gets the relative rewrite.
+            let new_text = index
+                .aliases
+                .remap(&edge.record.specifier, target, &index.files)
+                .unwrap_or_else(|| relative_specifier(&importer, target));
             if new_text == edge.record.specifier {
                 continue; // no-op rewrite, never reaches the plan
             }
