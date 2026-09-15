@@ -2,6 +2,12 @@
 name = "jmove"
 version = "0.1.0"
 edition = "2024"
+description = "Project-aware file mover and import fixer for TypeScript/JavaScript and Java: rewrites every import, applies atomically, dry-run + JSON for AI agents."
+license = "GPL-3.0-or-later"
+repository = "https://github.com/loki5512344/jmove"
+readme = "README.md"
+keywords = ["refactoring", "imports", "java", "typescript", "rename"]
+categories = ["development-tools", "command-line-utilities"]
 
 [dependencies]
 anyhow = "1.0.104"

@@ -1,0 +1,34 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          core.autocrlf: input
+      - run: cargo fmt --check
+      - run: cargo clippy --all-targets -- -D warnings
+
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      # core.autocrlf=input keeps the working tree LF on every OS: the
+      # span/byte-offset tests and the git rename assertions compare exact
+      # fixture bytes.
+      - uses: actions/checkout@v4
+        with:
+          core.autocrlf: input
+      - run: cargo test --locked
