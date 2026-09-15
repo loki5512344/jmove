@@ -12,9 +12,9 @@ jobs:
   lint:
     runs-on: ubuntu-latest
     steps:
+      - name: Keep LF line endings
+        run: git config --global core.autocrlf false
       - uses: actions/checkout@v4
-        with:
-          core.autocrlf: input
       - run: cargo fmt --check
       - run: cargo clippy --all-targets -- -D warnings
 
@@ -25,10 +25,11 @@ jobs:
         os: [ubuntu-latest, windows-latest]
     runs-on: ${{ matrix.os }}
     steps:
-      # core.autocrlf=input keeps the working tree LF on every OS: the
-      # span/byte-offset tests and the git rename assertions compare exact
-      # fixture bytes.
+      # Windows images ship core.autocrlf=true in the *system* gitconfig:
+      # without this override the checkout rewrites LF fixtures to CRLF and
+      # the span/byte-offset tests compare the wrong bytes. Global config
+      # outranks system, so it neutralizes the image default before checkout.
+      - name: Keep LF line endings
+        run: git config --global core.autocrlf false
       - uses: actions/checkout@v4
-        with:
-          core.autocrlf: input
       - run: cargo test --locked --no-fail-fast
