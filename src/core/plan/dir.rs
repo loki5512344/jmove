@@ -183,10 +183,16 @@ mod tests {
         let index = Index::build(dir.path())?;
         let plan = plan_move(&index, Path::new("lib"), Path::new("core/lib"))?;
         assert_eq!(plan.prune_dirs, [PathBuf::from("lib")]);
-        let moves: Vec<(&str, &str)> = plan
+        // rel_str: canonical '/' display, stable across platforms.
+        let moves: Vec<(String, String)> = plan
             .moves
             .iter()
-            .map(|m| (m.source.to_str().unwrap(), m.target.to_str().unwrap()))
+            .map(|m| {
+                (
+                    crate::core::rel_str(&m.source),
+                    crate::core::rel_str(&m.target),
+                )
+            })
             .collect();
         assert_eq!(
             moves,
