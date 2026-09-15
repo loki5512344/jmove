@@ -69,6 +69,9 @@ jmove mv src/com/example/utils/Parser.java src/com/example/core/Parser.java
 # Find broken imports (exit code 2 if any)
 jmove check
 
+# Feed CI/IDE: SARIF 2.1.0 or Checkstyle XML (never changes stdout/exit code)
+jmove check --report build/jmove.sarif
+
 # Auto-repair import problems (unused + missing imports today) — same dry-run/atomic engine
 jmove fix --dry-run
 jmove fix

@@ -6,6 +6,7 @@
 pub mod fix;
 pub mod json;
 pub mod output;
+pub mod report;
 
 use std::convert::identity;
 use std::path::{Path, PathBuf};
@@ -60,6 +61,9 @@ pub enum Command {
         /// Machine-readable JSON output.
         #[arg(long)]
         json: bool,
+        /// Write findings to a report file: `.sarif` or `.xml` (checkstyle).
+        #[arg(long)]
+        report: Option<PathBuf>,
     },
     /// Auto-fix small import problems (same engine as `mv`).
     Fix {
@@ -72,6 +76,9 @@ pub enum Command {
         /// Machine-readable JSON output (for AI agents).
         #[arg(long)]
         json: bool,
+        /// Write the candidate list to a report file: `.sarif` or `.xml`.
+        #[arg(long)]
+        report: Option<PathBuf>,
     },
 }
 
@@ -109,17 +116,24 @@ pub fn run() -> anyhow::Result<i32> {
             json,
             apply::GitMode::from_no_git(no_git),
         ),
-        Command::Check { json } => check(&args.root, args.source_root.as_deref(), json),
+        Command::Check { json, report } => report::check(
+            &args.root,
+            args.source_root.as_deref(),
+            json,
+            report.as_deref(),
+        ),
         Command::Fix {
             rule,
             dry_run,
             json,
+            report,
         } => fix::fix(
             &args.root,
             args.source_root.as_deref(),
             rule.as_deref(),
             dry_run,
             json,
+            report.as_deref(),
         ),
     };
     // Handlers report their own failures; both arms carry an exit code.
@@ -187,38 +201,6 @@ fn mv_dry_run(
         output::report_refs(&hidden);
     }
     Ok(exit::OK)
-}
-
-/// `check` handler: report relative imports that resolve to nothing.
-///
-/// Exit code is `2` when at least one broken import was found, in both the
-/// human and the `--json` mode (the JSON `status` stays `"ok"` — the
-/// command itself succeeded; agents read `total` or the exit code).
-fn check(root: &Path, source_root: Option<&Path>, json: bool) -> Flow<i32> {
-    let root = flow(json, "check", root.canonicalize().map_err(JmoveError::from))?;
-    let source_root = flow(json, "check", Index::normalize_scope(&root, source_root))?;
-    let scope = source_root.as_deref();
-    let index = flow(json, "check", Index::build_scoped(&root, scope))?;
-    let broken = flow(json, "check", output::broken_imports(&root, &index))?;
-    let mismatches = flow(json, "check", output::name_mismatches(&root, &index))?;
-    let code = if broken.is_empty() && mismatches.is_empty() {
-        exit::OK
-    } else {
-        exit::BROKEN
-    };
-
-    if json {
-        let total = broken.len();
-        let data = output::CheckData {
-            broken_imports: broken,
-            total,
-            name_mismatches: mismatches,
-        };
-        json::print(&Envelope::ok("check", data));
-    } else {
-        output::report_check(&broken, &mismatches);
-    }
-    Ok(code)
 }
 
 /// Unwrap a core result, routing failures through the CLI error channel.

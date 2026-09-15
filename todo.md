@@ -66,9 +66,9 @@ AI оставляем СНАРУЖИ: при неоднозначности jmov
 - [ ] Форматирование: свой cargo-fmt НЕ строим (вечный long-tail). Только «import formatting»
       (порядок/группировка — у нас уже есть spans). Опционально `--format-after <cmd>` (prettier /
       google-java-format), не зависимость
-- [ ] Интероп PMD/Checkstyle/eslint (фаза 2.5): `jmove fix --report checkstyle.xml` маппит
-      violation(file,line,rule) на паттерны; на выход SARIF для CI/IDE.
-      Маркетинг: «auto-fix for what Checkstyle only reports»
+- [x] Интероп Checkstyle/eslint (фаза 2.5): `check --report f.sarif|.xml` и `fix --report f.sarif|.xml` —
+      SARIF 2.1.0 (GitHub/CodeQL, autoFixable) и Checkstyle XML (source=jmove.<rule>); формат по расширению,
+      чистый прогон = валидный пустой файл, stdout/exit не меняются. Маркетинг: «auto-fix for what Checkstyle only reports»
 
 ## Guava real-world smoke test (google/guava @ main, JDK21, mvnw) — ПРОВЕРЕНО
 - [x] mv Primitives primitives→util: 5 правок (4 imports + package), `mvn -pl guava compile`

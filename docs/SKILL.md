@@ -57,7 +57,7 @@ Exit code never changes; surface the list to the user.
 ### check — find broken imports and Java layout errors
 
 ```
-jmove check [--root DIR] [--json]
+jmove check [--root DIR] [--json] [--report FILE]
 ```
 
 Run after any move (or any edit) to validate project consistency. Reports
@@ -65,10 +65,22 @@ broken relative imports and Java files whose single public type is named
 differently from the file (each finding carries the exact `jmove mv` that
 renames it; exit code 2 covers both kinds).
 
+### report files — SARIF and Checkstyle for CI/IDE
+
+`check` and `fix` accept `--report FILE`; the format is chosen by the file
+name suffix: `.sarif` → SARIF 2.1.0 (single run, `%SRCROOT%`-relative
+artifact URIs, `properties.autoFixable`), `.xml` → Checkstyle XML
+(`source="jmove.<rule>"` with `/` mapped to `.`). Unknown suffixes fail
+before any work with `INVALID_ARGUMENT`. The report mirrors what the run
+already computed (fix: candidates with their applied/manual status; dry-run
+included), stdout and exit codes stay as without `--report`, and clean runs
+write valid *empty* documents. Rule ids: the four fix rules above, plus
+`broken-import` and `java/class-name-mismatch`.
+
 ### fix — auto-repair import problems
 
 ```
-jmove fix [--root DIR] [--rule ID] [--dry-run] [--json]
+jmove fix [--root DIR] [--rule ID] [--dry-run] [--json] [--report FILE]
 ```
 
 Runs the deterministic rules over the whole project and applies the

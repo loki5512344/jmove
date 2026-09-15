@@ -15,6 +15,7 @@ use crate::core::{JmoveError, JmoveResult, rel_str};
 use crate::parser;
 
 use super::json::Envelope;
+use super::report::{self, Report};
 use super::{Flow, exit, fail, flow, json, output};
 
 /// One reported candidate (JSON element). `applied` is false for
@@ -77,7 +78,9 @@ pub fn fix(
     rule: Option<&str>,
     dry_run: bool,
     json: bool,
+    report: Option<&Path>,
 ) -> Flow<i32> {
+    let sink = flow(json, "fix", Report::parse(report))?;
     let root = flow(json, "fix", root.canonicalize().map_err(JmoveError::from))?;
     let source_root = flow(json, "fix", Index::normalize_scope(&root, source_root))?;
     if let Some(rejected) = fix_reject(rule) {
@@ -87,6 +90,7 @@ pub fn fix(
     let index = flow(json, "fix", Index::build_scoped(&root, scope))?;
     let plan = plan_fix(&index, rule);
     if plan.is_empty() {
+        flow(json, "fix", Report::emit(&sink, &[]))?;
         if json {
             json::print(&Envelope::ok("fix", empty_data()));
         } else {
@@ -95,13 +99,14 @@ pub fn fix(
         return Ok(exit::OK);
     }
     if dry_run {
-        return fix_dry_run(&root, json, &plan);
+        return fix_dry_run(&root, json, &plan, &sink);
     }
     // Line numbers use spans against the original contents, so the JSON
     // payload is assembled before any edit reaches the disk.
     let detail = flow(json, "fix", describe(&root, &plan))?;
     let edits = plan.auto_edits();
     let files_changed = flow(json, "fix", apply::apply_edits(&root, &edits))?;
+    flow(json, "fix", Report::emit(&sink, &report::from_fix(&detail)))?;
     if json {
         let fixes = edits.values().map(Vec::len).sum();
         json::print(&Envelope::ok(
@@ -151,11 +156,16 @@ fn fix_reject(rule: Option<&str>) -> Option<super::json::ErrorData> {
 }
 
 /// Dry-run branch: unified diff for humans, structured preview for agents.
-fn fix_dry_run(root: &Path, json: bool, plan: &FixPlan) -> Flow<i32> {
+fn fix_dry_run(root: &Path, json: bool, plan: &FixPlan, sink: &Option<Report>) -> Flow<i32> {
     let edits = plan.auto_edits();
     let diff = flow(json, "fix", render_edits_diff(root, &edits))?;
+    let detail = if json || sink.is_some() {
+        flow(json, "fix", describe(root, plan))?
+    } else {
+        Vec::new()
+    };
+    flow(json, "fix", Report::emit(sink, &report::from_fix(&detail)))?;
     if json {
-        let detail = flow(json, "fix", describe(root, plan))?;
         let affected = edits.keys().map(|p| rel_str(p)).collect();
         json::print(&Envelope::dry_run(
             "fix",

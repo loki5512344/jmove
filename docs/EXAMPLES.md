@@ -21,9 +21,7 @@ $ jmove mv lib/sum.ts utils/sum.ts --dry-run
 @@ -1,4 +1,4 @@
 -import { sum } from "./lib/sum";
 +import { sum } from "./utils/sum";
-
- export function main(): number {
-   return sum(1, 2);
+...
 move lib/sum.ts -> utils/sum.ts
 ```
 
@@ -57,8 +55,7 @@ $ echo $?
 
 ### Operating on another project
 
-`--root` points jmove at a project other than the current directory; all
-path arguments stay relative to that root:
+`--root` points jmove at another project; path arguments stay relative to it:
 
 ```console
 $ jmove --root ~/code/frontend mv src/old.ts src/new.ts --dry-run
@@ -75,8 +72,8 @@ $ echo $?
 ```
 
 jmove never overwrites: free the destination (or pick another name) and
-retry. A missing source reports `SOURCE_NOT_FOUND` the same way, and a
-file nobody imports simply moves with zero rewrites.
+retry. A missing source reports `SOURCE_NOT_FOUND`; an unimported file
+simply moves with zero rewrites.
 
 ### Java: package + imports + move in one step
 
@@ -87,7 +84,6 @@ is three coordinated edits — jmove makes all of them:
 $ jmove mv src/main/java/com/example/util/Text.java src/main/java/com/example/core/Text.java --dry-run
 --- src/main/java/com/example/app/App.java
 +++ src/main/java/com/example/app/App.java
-@@ -1,7 +1,7 @@
  package com.example.app;
 
 -import com.example.util.Text;
@@ -112,8 +108,6 @@ dry-run/atomic engine. Preview first, then apply:
 
 ```console
 $ cat src/main/java/com/example/app/App.java
-package com.example.app;
-
 import com.example.Text;
 import com.example.unused.Ghost;   // never referenced
 
@@ -121,7 +115,6 @@ import com.example.unused.Ghost;   // never referenced
 $ jmove fix --dry-run
 --- src/main/java/com/example/app/App.java
 +++ src/main/java/com/example/app/App.java
-@@ -1,6 +1,5 @@
  package com.example.app;
 
  import com.example.Text;
@@ -226,10 +219,18 @@ $ jmove check --json
 }
 ```
 
-Note: this response keeps `status: "ok"` (the command itself succeeded)
-while the process exits `2`; treat a non-zero `total` — or exit code `2` —
-as a failed refactor. A clean project returns `"broken_imports": [], "total": 0`
-and exit code `0`.
+Note: the response keeps `status: "ok"` while the process exits `2`; treat a
+non-zero `total` (or exit `2`) as a failed refactor; clean returns exit `0`.
+
+### CI report (same findings, machine formats)
+
+```console
+$ jmove check --report build/jmove.sarif   # SARIF 2.1.0, GitHub/CodeQL
+$ jmove fix --report build/jmove.xml       # Checkstyle XML, IDEs/Jenkins
+```
+
+`--report` never changes stdout or the exit code; clean runs write valid
+empty documents. Rule ids match the `--json` ones.
 
 ### Error shape
 
