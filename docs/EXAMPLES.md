@@ -3,9 +3,11 @@
 Concrete examples for both audiences: humans at a terminal and AI agents
 consuming `--json`. All outputs below are captured from the real binary.
 
-Flags (see `jmove --help`): `mv <source> <target> [--dry-run] [--json]`,
-`check [--json]`, and the global `--root <DIR>`. Paths may be relative to
-the root or absolute inside it; `.gitignore`d files are never indexed.
+Flags (see `jmove --help`): `mv <source> <target> [--dry-run] [--json]
+[--no-git]`, `check [--json]`, and the global `--root <DIR>`. Paths may be
+relative to the root or absolute inside it; `.gitignore`d files are never
+indexed. Inside a git repo, `mv` of a tracked file uses `git mv` (the
+rename is staged); `--no-git` forces a plain filesystem rename.
 Exit codes: `0` ok · `1` operation error · `2` `check` found broken imports.
 
 ## Human usage
@@ -103,6 +105,50 @@ fourth rewrite. Targets outside the source root, non-`.java` targets and
 cross-directory moves of default-package classes are rejected with
 `PLAN_REJECTED` (exit 1) and change nothing.
 
+### Fix: auto-repair unused imports
+
+`fix` runs deterministic rules and applies them through the same
+dry-run/atomic engine. Preview first, then apply:
+
+```console
+$ cat src/main/java/com/example/app/App.java
+package com.example.app;
+
+import com.example.Text;
+import com.example.unused.Ghost;   // never referenced
+
+...
+$ jmove fix --dry-run
+--- src/main/java/com/example/app/App.java
++++ src/main/java/com/example/app/App.java
+@@ -1,6 +1,5 @@
+ package com.example.app;
+
+ import com.example.Text;
+-import com.example.unused.Ghost;
+...
+$ jmove fix
+fixed 1 issue in 1 file
+```
+
+Only provably-dead imports are removed: the whole statement line (with its
+newline) disappears and every other line stays byte-identical. A name that
+also appears in a comment, string literal or a sibling static import is
+kept, so the rule can only under-report, never delete live code. Scope to
+one rule with `--rule java/unused-import` (`java/import-order` sorts the block
+google-style); an unknown id exits `1` with `INVALID_ARGUMENT` and lists the rules.
+
+### Fix: add a missing import for a bare type reference
+
+After a Java `mv` changes a file's package, references to former
+same-package siblings stop resolving. `java/missing-import` inserts the
+import for a unique FQN in the class index; ambiguous ones are reported.
+
+```console
+$ jmove fix --rule java/missing-import
+fixed 1 issue in 1 file   # inserted: import com.example.util.Maths;
+```
+
 ## AI-agent usage (`--json`)
 
 Every `--json` response is a flat envelope: `status` (`"ok"` | `"dry_run"`
@@ -122,6 +168,7 @@ $ jmove mv lib/sum.ts utils/sum.ts --dry-run --json
   "affected_files": [
     "app.ts"
   ],
+  "would_move_via": "fs",
   "diff": "--- app.ts\n+++ app.ts\n@@ -1,4 +1,4 @@\n-import { sum } from \"./lib/sum\";\n+import { sum } from \"./utils/sum\";\n..."
 }
 ```
@@ -151,12 +198,15 @@ $ jmove mv lib/sum.ts utils/sum.ts --json
     }
   ],
   "moved": 1,
-  "updated_imports": 1
+  "updated_imports": 1,
+  "moved_via": "fs"
 }
 ```
 
 `changed_files[].changes[]` lists every rewritten specifier with its
-1-based line; `moved` and `updated_imports` are the counters.
+1-based line; `moved` and `updated_imports` are the counters,
+`moved_via` tells whether the rename went through git (`"git"`, staged)
+or the plain filesystem (`"fs"`).
 
 ### 3. Verify
 

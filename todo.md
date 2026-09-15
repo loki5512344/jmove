@@ -45,14 +45,17 @@
 dry-run/rollback/error-codes не переживают недетерминированный движок).
 AI оставляем СНАРУЖИ: при неоднозначности jmove отдаёт `candidates` в --json,
 агент (LLM) выбирает и повторяет команду — в рамках нашего agent-first UX.
-- [ ] Edit engine: расширить `rewrite_bytes` с замены span до `Edit{span,new}`
-      (пустой span = вставка; замена на "" + поглощение `\n` = удаление строки);
-      apply/rollback/diff/json трогаются минимально (они уже generic над правками)
-- [ ] `Fix` trait рядом с `Language`: `fixes(source, ctx) -> Vec<FixCandidate>`
+- [x] Edit engine: `core::Edit{span,old_text,new_text}` — replace/insert/delete в одном движке
+      (`rewrite_bytes` generic над `&[Edit]`, пустой span = вставка, `new_text=""` = удаление;
+      overlap/malformed spans → PlanRejected, не-char-boundary/content-mismatch → StaleIndex
+      до записи); apply/rollback/diff/json переведены минимально (MovePlan.rewrites → Edit через `From`)
+- [x] `Fix` trait рядом с `Language`: `fixes(path, source, index) -> Vec<FixCandidate>`
       {rule, severity, auto_fixable, edits}; `jmove fix [--rule ...] [--dry-run] [--json]`
-- [ ] Java v1: unused-imports (skip wildcard/ambiguous), import-order (Checkstyle-подобные группы),
-      missing-import (Type без импорта, ровно 1 кандидат в FQN-индексе → фикс; иначе candidates для агента),
-      class-name-mismatch
+      (тот же apply/rollback/diff: `apply_edits` + `render_edits_diff` без move)
+- [~] Java v1: unused-imports (DONE, skip wildcard/ambiguous), missing-import (DONE: unique FQN candidate →
+      insert `import pkg.Type;` at the import-block end; ambiguous/wildcard → `--json` `candidates`, applied:false;
+      закрыт guava-разрыв «перенесли файл, соседняя ссылка без импорта умерла» — проверено mv+fix+javac SUCCESS),
+      import-order (DONE: Google-стиль — statics первыми, ASCII-сортировка, дедуп; конфликтующие с другими правилами откладываются (prune_overlaps по severity) и сходятся за 2-3 прогона), class-name-mismatch
 - [ ] TS v1: unused-imports, import-order; add-import требует индекс экспортов (символ→файл)
 - [ ] Форматирование: свой cargo-fmt НЕ строим (вечный long-tail). Только «import formatting»
       (порядок/группировка — у нас уже есть spans). Опционально `--format-after <cmd>` (prettier /
@@ -69,6 +72,8 @@ AI оставляем СНАРУЖИ: при неоднозначности jmov
       `GwtCompatible` БЕЗ импорта (тот же пакет) → после mv ссылка битая. jmove в v1 осознанно
       НЕ добавляет импорты. Это главный driver для fix/missing-import из Phase 1.6 выше
 - [ ] (после fix) повторить обе перемещения как `mv` + авто-`fix` и добить compile до SUCCESS
+      (паттерн воспроизведён и закрыт локально: mv файла с bare-ссылкой на соседний пакет →
+      `fix` добавил импорт → javac SUCCESS; на реальном guava ещё не прогонялось)
 - [ ] Индексация в monorepo с дублями пакетов (guava vs android/guava в одном --root):
       FQN-коллизии → class_index оставляет первый по сортировке, импорт резолвится не туда.
       Нужен выбор/фильтр source root (например `--source-root` или авто-определение по mv-цели)
@@ -78,7 +83,7 @@ AI оставляем СНАРУЖИ: при неоднозначности jmov
 - [ ] Инкрементальная переиндексация (только изменённые файлы)
 - [ ] Поддержка tsconfig paths / алиасов (@/...)
 - [ ] Параллельная индексация через rayon
-- [ ] --git интеграция (git mv для stage/истории)
+- [x] --git интеграция (git mv для stage/истории): auto для tracked файлов, --no-git флаг, moved_via/would_move_via в --json
 - [ ] Перенос директорий целиком (mv папки)
 - [ ] Предупреждения о не-import ссылках: package.json exports, jest mocks, tsconfig includes, markdown links
 - [ ] prettier интеграция после rewrite (по желанию)
@@ -87,7 +92,10 @@ AI оставляем СНАРУЖИ: при неоднозначности jmov
 - [ ] Поддержка Python (from/import, относительные точки)
 - [ ] Поддержка Go (per-file, НЕ whole-package как refac)
 - [ ] Команда split (авто-разбивка файла на несколько)
-- [ ] Windows-пути (camino/normalize) — CI matrix
+- [x] Windows-пути: `core::rel_str` — единый формат относительных путей на границе CLI
+      (human/JSON/diff-заголовки/git-pathspecs всегда через `/`, не `Path::display()`);
+      CI matrix linux+windows (`cargo test --locked`), checkout с `core.autocrlf=input`.
+      Camino не ввели: PathBuf остаётся внутренней валютой, славши нужен только на выводе
 
 ## Идеи на потом
 - [ ] LSP интеграция (jmove сам как LSP server)

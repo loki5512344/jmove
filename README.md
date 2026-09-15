@@ -28,7 +28,20 @@ jmove's answer:
 ## Install
 
 ```sh
+# From a clone of this repo (installs `jmove` into ~/.cargo/bin, on PATH):
+cargo install --path . --locked
+
+# Latest published version (once jmove is on crates.io — not yet published):
 cargo install jmove
+```
+
+Use as a library (the CLI and the engine are separate targets; `jmove::core`
+holds indexing/planning/apply, `jmove::parser` the language frontends):
+
+```toml
+[dependencies]
+jmove = { git = "https://github.com/loki5512344/jmove" }
+# or, for a local checkout:  jmove = { path = "../jmove" }
 ```
 
 ## Usage
@@ -40,11 +53,19 @@ jmove mv src/utils/parser.ts src/core/parser.ts --dry-run
 # Apply it
 jmove mv src/utils/parser.ts src/core/parser.ts
 
+# Inside a git repo a tracked file moves via `git mv` (staged, history kept);
+# --no-git forces a plain rename
+jmove mv src/foo.ts src/bar/foo.ts --no-git
+
 # Java: jmove updates `package`, all `import`s and moves the file
 jmove mv src/com/example/utils/Parser.java src/com/example/core/Parser.java
 
 # Find broken imports (exit code 2 if any)
 jmove check
+
+# Auto-repair import problems (unused + missing imports today) — same dry-run/atomic engine
+jmove fix --dry-run
+jmove fix
 
 # AI-agent workflow
 jmove mv src/foo.ts src/bar/foo.ts --dry-run --json
@@ -58,10 +79,10 @@ See [docs/EXAMPLES.md](docs/EXAMPLES.md) for more, and
 ## Roadmap
 
 TypeScript/JavaScript and Java (the open niche) are in — real-world tested
-on `google/guava`. Next: a `fix` command reusing the same dry-run/atomic
-engine to auto-repair small breakages (unused/missing/misordered imports),
-then Python, Go. `split` (automatic file decomposition) is planned — no
-tool does it. Full plan: [docs/PLAN.md](docs/PLAN.md).
+on `google/guava`. `fix` auto-repairs small breakages on the same
+dry-run/atomic engine (unused, missing and misordered Java imports;
+TS rules next), then Python, Go. `split` (automatic file decomposition) is
+planned — no tool does it. Full plan: [docs/PLAN.md](docs/PLAN.md).
 
 ## License
 
