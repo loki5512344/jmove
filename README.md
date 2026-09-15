@@ -80,8 +80,8 @@ See [docs/EXAMPLES.md](docs/EXAMPLES.md) for more, and
 
 TypeScript/JavaScript and Java (the open niche) are in — real-world tested
 on `google/guava`. `fix` auto-repairs small breakages on the same
-dry-run/atomic engine (unused, missing and misordered Java imports;
-TS rules next), then Python, Go. `split` (automatic file decomposition) is
+dry-run/atomic engine (Java: unused, missing and
+misordered imports; TS: unused imports), then Python, Go. `split` (automatic file decomposition) is
 planned — no tool does it. Full plan: [docs/PLAN.md](docs/PLAN.md).
 
 ## License

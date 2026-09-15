@@ -247,3 +247,27 @@ fn three_rules_converge_on_one_project() {
         .stdout(predicate::str::contains("nothing to change"));
     jmove(&tmp, &["check"]).success();
 }
+
+fn ts_unused() -> tempfile::TempDir {
+    common::copy_fixture("typescript", "unused")
+}
+
+#[test]
+fn ts_unused_import_deletes_dead_type_import_and_keeps_the_rest() {
+    let tmp = ts_unused();
+    // The whole-statement delete must fire for the dead `Ghost` type import.
+    jmove(&tmp, &["fix", "--rule", "ts/unused-import", "--json"])
+        .success()
+        .stdout(
+            predicate::str::contains("\"rule\": \"ts/unused-import\"")
+                .and(predicate::str::contains("\"applied\": true")),
+        );
+    let app = read(&in_root(tmp.path(), "src/app.ts"));
+    assert!(!app.contains("Ghost"), "{app}");
+    // Side-effect import, the mixed used/unused statement and the default
+    // class import all stay (under-delete safety).
+    assert!(app.contains("import './side-effects';"), "{app}");
+    assert!(app.contains("unused"), "{app}");
+    assert!(app.contains("import Logger"), "{app}");
+    jmove(&tmp, &["check"]).success();
+}

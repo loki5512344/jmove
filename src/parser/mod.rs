@@ -188,6 +188,29 @@ pub trait Fix: Send + Sync {
     fn fixes(&self, path: &Path, source: &str, index: &Index) -> Vec<FixCandidate>;
 }
 
+/// `word` as a standalone identifier token outside `skip`. Shared by the
+/// deletion-safety scans of every `unused-import` rule. Bytes >= 0x80
+/// count as identifier parts: treating a possibly-mojibake neighbour as
+/// "part of a bigger word" can only keep an import, never drop one.
+pub(crate) fn word_occurs(source: &[u8], word: &[u8], skip: &Range<usize>) -> bool {
+    if word.is_empty() {
+        return false;
+    }
+    source.windows(word.len()).enumerate().any(|(at, found)| {
+        let end = at + word.len();
+        if at < skip.end && end > skip.start {
+            return false;
+        }
+        let before = at == 0 || !is_ident_byte(source[at - 1]);
+        let after = end == source.len() || !is_ident_byte(source[end]);
+        *found == *word && before && after
+    })
+}
+
+fn is_ident_byte(byte: u8) -> bool {
+    byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'$') || byte >= 0x80
+}
+
 /// Default rule set for `lang` (empty for languages without rules yet).
 #[must_use]
 pub fn fixers_for(lang: SourceLanguage) -> Vec<Box<dyn Fix>> {
@@ -197,7 +220,9 @@ pub fn fixers_for(lang: SourceLanguage) -> Vec<Box<dyn Fix>> {
             Box::new(java::rules::missing_imports::JavaMissingImports::new()),
             Box::new(java::rules::import_order::JavaImportOrder::new()),
         ],
-        SourceLanguage::TypeScript | SourceLanguage::Tsx | SourceLanguage::JavaScript => Vec::new(),
+        SourceLanguage::TypeScript | SourceLanguage::Tsx | SourceLanguage::JavaScript => {
+            vec![Box::new(ts::unused_imports::TsUnusedImports::new())]
+        }
     }
 }
 
@@ -208,5 +233,6 @@ pub fn rule_ids() -> &'static [&'static str] {
         java::rules::unused_imports::RULE,
         java::rules::missing_imports::RULE,
         java::rules::import_order::RULE,
+        ts::unused_imports::RULE,
     ]
 }

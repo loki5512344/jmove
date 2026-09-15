@@ -1,10 +1,9 @@
 //! Tree-sitter based frontend for TypeScript/JavaScript.
 //!
-//! CONTRACT: see [`crate::parser`]. Traversal lives in [`ts_extract`].
+//! CONTRACT: see [`crate::parser`]. Traversal lives in [`extract`].
 
-// Inline module so the folder stays at `mod.rs` + 3 files.
-#[path = "ts_extract.rs"]
-mod ts_extract;
+mod extract;
+pub mod unused_imports;
 
 use super::{ImportRecord, Language, SourceLanguage};
 
@@ -27,7 +26,7 @@ impl Language for TreeSitterTs {
     }
 
     fn extract_imports(&self, source: &str) -> Vec<ImportRecord> {
-        ts_extract::extract(self.lang, source)
+        extract::extract(self.lang, source)
     }
 }
 

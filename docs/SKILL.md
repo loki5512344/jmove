@@ -53,7 +53,11 @@ exit codes). Current Java rules: `java/unused-import` (deletes single-type
 imports whose name is provably unreferenced), `java/missing-import`
 (inserts the import of a project class used by simple name — unique FQN
 candidate required) and `java/import-order` (Google style: statics first,
-then single-type, ASCII-sorted, duplicates dropped). Unknown `--rule`
+then single-type, ASCII-sorted, duplicates dropped). TS/JS:
+`ts/unused-import` deletes whole statements whose every bound name is
+unreferenced; mixed statements (one name live) stay untouched because ESM
+imports carry module side effects, so partial specifier surgery is
+deliberately off. Unknown `--rule`
 fails with `INVALID_ARGUMENT` and lists the known ids. A candidate the
 engine cannot prove safe is reported with `"applied": false` and a
 `candidates` array of FQN options — resolve it yourself (pick one, add

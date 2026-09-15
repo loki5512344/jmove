@@ -1,4 +1,4 @@
-//! Tree-sitter traversal backing [`crate::parser::ts`].
+//! Tree-sitter traversal backing [`crate::parser::ts`] and its rules.
 //!
 //! Finds every module reference: `import`/`export … from` statements (the
 //! grammar exposes the specifier via the `source` field), `require("…")`
@@ -63,7 +63,7 @@ fn visit(node: Node, source: &str, out: &mut Vec<ImportRecord>) {
 /// plain JavaScript; only JSX needs the TSX variant. Java never reaches
 /// this frontend ([`crate::parser::frontend_for`] routes it to
 /// [`crate::parser::java`]), so everything else maps to plain TypeScript.
-fn grammar(lang: SourceLanguage) -> Language {
+pub(super) fn grammar(lang: SourceLanguage) -> Language {
     match lang {
         SourceLanguage::Tsx => tree_sitter_typescript::LANGUAGE_TSX.into(),
         _ => tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into(),

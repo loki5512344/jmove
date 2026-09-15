@@ -13,7 +13,6 @@
 //! column zero, and anything else is the generator's problem, not the
 //! engine's (see [`crate::core::Edit`]).
 
-use std::ops::Range;
 use std::path::Path;
 
 use tree_sitter::Node;
@@ -22,7 +21,7 @@ use super::is_static;
 use crate::core::Edit;
 use crate::core::index::Index;
 use crate::parser::java::{TreeSitterJava, find_child_kind, has_child_kind, line_end, text};
-use crate::parser::{Fix, FixCandidate, Severity};
+use crate::parser::{Fix, FixCandidate, Severity, word_occurs};
 
 /// Rule id accepted by `jmove fix --rule`.
 pub const RULE: &str = "java/unused-import";
@@ -98,30 +97,6 @@ fn unused_import(node: Node, source: &str) -> Option<FixCandidate> {
         }],
         candidates: Vec::new(),
     })
-}
-
-// `word` as a standalone Java identifier token outside `skip`. Matches
-// overlapping the import statement itself never count as usage. Bytes
-// >= 0x80 count as identifier parts: treating a possibly-mojibake
-// neighbour as "part of a bigger word" can only keep an import, never
-// drop one.
-fn word_occurs(source: &[u8], word: &[u8], skip: &Range<usize>) -> bool {
-    if word.is_empty() {
-        return false;
-    }
-    source.windows(word.len()).enumerate().any(|(at, found)| {
-        let end = at + word.len();
-        if at < skip.end && end > skip.start {
-            return false;
-        }
-        let before = at == 0 || !is_ident(source[at - 1]);
-        let after = end == source.len() || !is_ident(source[end]);
-        *found == *word && before && after
-    })
-}
-
-fn is_ident(byte: u8) -> bool {
-    byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'$') || byte >= 0x80
 }
 
 #[cfg(test)]
