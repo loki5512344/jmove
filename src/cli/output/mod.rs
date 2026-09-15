@@ -167,13 +167,9 @@ pub fn report_refs(refs: &[crate::core::refs::NonImportRef]) {
         return;
     }
     eprintln!(
-        "warning: {} non-import reference {} may need manual fixing:",
+        "warning: {} non-import reference{} to moved files may need manual fixing:",
         refs.len(),
-        if refs.len() == 1 {
-            "to the moved file"
-        } else {
-            "s to moved files"
-        }
+        if refs.len() == 1 { "" } else { "s" }
     );
     for r in refs.iter().take(10) {
         eprintln!("  {}:{}", r.file, r.line);
