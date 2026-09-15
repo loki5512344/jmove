@@ -55,7 +55,9 @@ AI оставляем СНАРУЖИ: при неоднозначности jmov
 - [~] Java v1: unused-imports (DONE, skip wildcard/ambiguous), missing-import (DONE: unique FQN candidate →
       insert `import pkg.Type;` at the import-block end; ambiguous/wildcard → `--json` `candidates`, applied:false;
       закрыт guava-разрыв «перенесли файл, соседняя ссылка без импорта умерла» — проверено mv+fix+javac SUCCESS),
-      import-order (DONE: Google-стиль — statics первыми, ASCII-сортировка, дедуп; конфликтующие с другими правилами откладываются (prune_overlaps по severity) и сходятся за 2-3 прогона), class-name-mismatch
+      import-order (DONE: Google-стиль — statics первыми, ASCII-сортировка, дедуп; конфликтующие с другими правилами откладываются (prune_overlaps по severity) и сходятся за 2-3 прогона),
+ class-name-mismatch (DONE как ПОВЕРХНОСТЬ check, не fix: починка = переименование файла, а fix-движок умеет только байтовые правки;
+ check отдаёт находку с готовой командой `jmove mv`, exit code 2; rename не меняет FQN → импорты не трогаются)
 - [x] TS v1: unused-imports (DONE: whole-statement delete, все биндинги мертвы → строка уходит;
       mixed used/unused НЕ трогаем — в ESM импорт исполняет побочные эффекты модуля,
       partial-удаление specifier'ов отложено осознанно)

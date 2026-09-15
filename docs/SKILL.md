@@ -40,13 +40,16 @@ working tree unstaged either way — stage or commit them yourself.
 `--json` reports the choice as `moved_via` (`"git"`/`"fs"`) and, on a
 dry-run, `would_move_via`.
 
-### check — find broken imports
+### check — find broken imports and Java layout errors
 
 ```
 jmove check [--root DIR] [--json]
 ```
 
-Run after any move (or any edit) to validate project consistency.
+Run after any move (or any edit) to validate project consistency. Reports
+broken relative imports and Java files whose single public type is named
+differently from the file (each finding carries the exact `jmove mv` that
+renames it; exit code 2 covers both kinds).
 
 ### fix — auto-repair import problems
 
@@ -119,7 +122,7 @@ and a `hint` describing the next action. On success, `mv` reports
 
 - `0` — success
 - `1` — operation failed (read `--json` error or stderr)
-- `2` — `check` found broken imports
+- `2` — `check` found broken imports or Java name mismatches
 
 ## Rules of use
 

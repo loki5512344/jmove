@@ -42,7 +42,7 @@ Rewrites happen first, the rename last; any failure rolls everything back.
 
 ```console
 $ jmove check
-check: no broken imports found
+check: no findings
 ```
 
 When something does point at nothing, `check` prints one line per broken

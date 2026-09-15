@@ -12,6 +12,7 @@ use std::path::{Path, PathBuf};
 
 use tree_sitter::{Node, Parser, Tree};
 
+pub mod class_name;
 pub mod rules;
 
 use super::{ImportRecord, Language, PackageDecl, SourceLanguage};

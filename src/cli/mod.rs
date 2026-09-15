@@ -196,7 +196,8 @@ fn check(root: &Path, source_root: Option<&Path>, json: bool) -> Flow<i32> {
     let scope = source_root.as_deref();
     let index = flow(json, "check", Index::build_scoped(&root, scope))?;
     let broken = flow(json, "check", output::broken_imports(&root, &index))?;
-    let code = if broken.is_empty() {
+    let mismatches = flow(json, "check", output::name_mismatches(&root, &index))?;
+    let code = if broken.is_empty() && mismatches.is_empty() {
         exit::OK
     } else {
         exit::BROKEN
@@ -207,10 +208,11 @@ fn check(root: &Path, source_root: Option<&Path>, json: bool) -> Flow<i32> {
         let data = output::CheckData {
             broken_imports: broken,
             total,
+            name_mismatches: mismatches,
         };
         json::print(&Envelope::ok("check", data));
     } else {
-        output::report_check(&broken);
+        output::report_check(&broken, &mismatches);
     }
     Ok(code)
 }

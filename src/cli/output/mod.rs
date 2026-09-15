@@ -1,25 +1,26 @@
 //! Human-readable rendering plus the payload builders that both output
-//! modes share: grouping rewrites, resolving broken imports, line lookup.
+//! modes share: grouping rewrites, `mv` pre-flight validation, line lookup.
+//! The `check` payloads and collectors live in [`check`].
 //!
 //! Pure functions returning data, except [`report_check`] and
 //! [`print_error`] which perform the only I/O (stdout and stderr).
 
-use serde::Serialize;
-
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-use crate::core::index::Index;
 use crate::core::plan::{MovePlan, Rewrite};
 use crate::core::{JmoveResult, rel_str};
 
+mod check;
+
 use super::json::{Change, ChangedFile, ErrorData};
 
-/// `check` stdout line when the project has no broken imports.
-const CHECK_CLEAN: &str = "check: no broken imports found";
+pub use check::{
+    BrokenImport, CheckData, NameMismatch, broken_imports, name_mismatches, report_check,
+};
 
 /// Read a project file (project-relative path) as UTF-8 text.
-fn read_file(root: &Path, rel: &Path) -> JmoveResult<String> {
+pub(crate) fn read_file(root: &Path, rel: &Path) -> JmoveResult<String> {
     Ok(std::fs::read_to_string(root.join(rel))?)
 }
 
@@ -44,32 +45,6 @@ pub fn group_by_file(rewrites: &[Rewrite]) -> Vec<(&Path, Vec<&Rewrite>)> {
     }
     map.into_iter().collect()
 }
-
-/// Collect every relative import that resolves to nothing in `index`.
-///
-/// A specifier starting with `.` whose target is `None` is broken; a bare
-/// package specifier without a target is an external dependency, not an
-/// error. Results are sorted by file, then line.
-pub fn broken_imports(root: &Path, index: &Index) -> JmoveResult<Vec<BrokenImport>> {
-    let mut broken: Vec<BrokenImport> = Vec::new();
-    for (file, imports) in &index.imports {
-        for import in imports {
-            if import.target.is_some() || !import.record.specifier.starts_with('.') {
-                continue;
-            }
-            let text = read_file(root, file)?;
-            broken.push(BrokenImport {
-                file: rel_str(file),
-                line: line_of(&text, import.record.span.start),
-                import: import.record.specifier.clone(),
-                reason: "file_not_found",
-            });
-        }
-    }
-    broken.sort_by(|a, b| (&a.file, a.line).cmp(&(&b.file, b.line)));
-    Ok(broken)
-}
-
 /// Build the `changed_files` payload: line-level specifier diffs grouped per
 /// importer, computed against the on-disk contents at call time.
 pub fn changed_files(root: &Path, plan: &MovePlan) -> JmoveResult<Vec<ChangedFile>> {
@@ -165,23 +140,6 @@ pub fn mv_summary(plan: &MovePlan, via_git: bool) -> String {
         plural(files, "file"),
     )
 }
-
-/// Print the human `check` report: the clean note, or one
-/// `path:line: cannot resolve 'spec'` line per broken import.
-pub fn report_check(broken: &[BrokenImport]) {
-    if broken.is_empty() {
-        println!("{CHECK_CLEAN}");
-        return;
-    }
-    for entry in broken {
-        let line = format!(
-            "{}:{}: cannot resolve '{}'",
-            entry.file, entry.line, entry.import
-        );
-        println!("{line}");
-    }
-}
-
 /// Print an operation error to stderr, with the hint on its own line.
 pub fn print_error(message: &str, hint: Option<&str>) {
     eprintln!("jmove: {message}");
@@ -197,26 +155,4 @@ pub(crate) fn plural(count: usize, noun: &str) -> String {
     } else {
         format!("{noun}s")
     }
-}
-
-/// One unresolvable relative import found by `check`.
-#[derive(Debug, Serialize)]
-pub struct BrokenImport {
-    /// Project-relative file declaring the import.
-    pub file: String,
-    /// 1-based line of the specifier.
-    pub line: usize,
-    /// Specifier text as written.
-    pub import: String,
-    /// Stable reason code, currently always `"file_not_found"`.
-    pub reason: &'static str,
-}
-
-/// Success payload of `check --json` (flattened under the envelope).
-#[derive(Debug, Serialize)]
-pub struct CheckData {
-    /// Broken imports, sorted by file then line.
-    pub broken_imports: Vec<BrokenImport>,
-    /// Number of broken imports (kept as an explicit counter for agents).
-    pub total: usize,
 }

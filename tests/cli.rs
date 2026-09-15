@@ -105,7 +105,7 @@ fn check_passes_on_clean_and_fails_on_broken_fixture() {
     let clean = fixture("basic");
     jmove(&clean, &["check"])
         .success()
-        .stdout(predicate::str::contains("no broken imports"));
+        .stdout(predicate::str::contains("check: no findings"));
 
     let messy = fixture("complex");
     jmove(&messy, &["check"])
