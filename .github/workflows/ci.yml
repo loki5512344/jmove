@@ -31,4 +31,4 @@ jobs:
       - uses: actions/checkout@v4
         with:
           core.autocrlf: input
-      - run: cargo test --locked
+      - run: cargo test --locked --no-fail-fast
