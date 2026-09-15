@@ -149,3 +149,56 @@ fn default_package_file_cannot_change_directory() {
     .success();
     assert!(in_root(tmp.path(), "src/main/java/Run.java").is_file());
 }
+
+fn monorepo() -> tempfile::TempDir {
+    fixture("monorepo")
+}
+
+#[test]
+fn source_root_scopes_the_move_to_one_duplicate_tree() {
+    let tmp = monorepo();
+    jmove(
+        &tmp,
+        &[
+            "mv",
+            "--source-root",
+            "guava",
+            "guava/src/com/example/Primitives.java",
+            "guava/src/com/example/util/Primitives.java",
+        ],
+    )
+    .success()
+    .stdout(predicate::str::contains("updated 2 imports in 2 files"));
+
+    // The scoped tree moved and its importer followed the new package.
+    let app = read(&in_root(tmp.path(), "guava/src/com/example/app/App.java"));
+    assert!(app.contains("import com.example.util.Primitives;"), "{app}");
+    let moved = read(&in_root(
+        tmp.path(),
+        "guava/src/com/example/util/Primitives.java",
+    ));
+    assert!(moved.contains("package com.example.util;"), "{moved}");
+
+    // The sibling copy is a self-contained tree: not one byte touched.
+    let android = read(&in_root(
+        tmp.path(),
+        "android/guava/src/com/example/app/App.java",
+    ));
+    assert!(
+        android.contains("import com.example.Primitives;"),
+        "{android}"
+    );
+    assert!(in_root(tmp.path(), "android/guava/src/com/example/Primitives.java").is_file());
+    jmove(&tmp, &["check", "--source-root", "guava"]).success();
+}
+
+#[test]
+fn unknown_source_root_is_rejected() {
+    let tmp = monorepo();
+    jmove(&tmp, &["check", "--source-root", "nope"])
+        .failure()
+        .code(1)
+        .stderr(predicate::str::contains(
+            "--source-root 'nope' is not a directory",
+        ));
+}

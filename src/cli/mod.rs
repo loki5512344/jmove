@@ -29,6 +29,10 @@ pub struct Args {
     /// Project root (defaults to the current directory).
     #[arg(long, global = true, default_value = ".")]
     pub root: PathBuf,
+    /// Index only files under this root-relative directory: the monorepo
+    /// disambiguator for duplicate Java packages (`guava` vs `android/guava`).
+    #[arg(long, global = true)]
+    pub source_root: Option<PathBuf>,
 }
 
 /// Available subcommands (MVP: `mv`, `check`).
@@ -95,13 +99,27 @@ pub fn run() -> anyhow::Result<i32> {
             dry_run,
             json,
             no_git,
-        } => mv(&args.root, &source, &target, dry_run, json, no_git),
-        Command::Check { json } => check(&args.root, json),
+        } => mv(
+            &args.root,
+            args.source_root.as_deref(),
+            &source,
+            &target,
+            dry_run,
+            json,
+            no_git,
+        ),
+        Command::Check { json } => check(&args.root, args.source_root.as_deref(), json),
         Command::Fix {
             rule,
             dry_run,
             json,
-        } => fix::fix(&args.root, rule.as_deref(), dry_run, json),
+        } => fix::fix(
+            &args.root,
+            args.source_root.as_deref(),
+            rule.as_deref(),
+            dry_run,
+            json,
+        ),
     };
     // Handlers report their own failures; both arms carry an exit code.
     Ok(outcome.unwrap_or_else(identity))
@@ -110,6 +128,7 @@ pub fn run() -> anyhow::Result<i32> {
 /// `mv` handler: normalize paths, validate, index, plan, then dry-run or apply.
 fn mv(
     root: &Path,
+    source_root: Option<&Path>,
     source: &Path,
     target: &Path,
     dry_run: bool,
@@ -118,13 +137,15 @@ fn mv(
 ) -> Flow<i32> {
     let git = apply::GitMode::from_no_git(no_git);
     let root = flow(json, "mv", root.canonicalize().map_err(JmoveError::from))?;
+    let source_root = flow(json, "mv", normalize_scope(&root, source_root))?;
     let source = flow(json, "mv", core::rel_from_root(&root, source))?;
     let target = flow(json, "mv", core::rel_from_root(&root, target))?;
-    if let Some(rejected) = mv_reject(&root, &source, &target) {
+    if let Some(rejected) = output::mv_reject(&root, &source, &target) {
         return Err(fail(json, "mv", rejected));
     }
 
-    let index = flow(json, "mv", Index::build(&root))?;
+    let scope = source_root.as_deref();
+    let index = flow(json, "mv", Index::build_scoped(&root, scope))?;
     let plan = flow(json, "mv", plan::plan_move(&index, &source, &target))?;
     if dry_run {
         return mv_dry_run(&root, json, &plan, git);
@@ -149,48 +170,6 @@ fn mv(
     Ok(exit::OK)
 }
 
-/// Pre-flight `mv` validation. A file that exists on disk but is absent
-/// from the import index stays moveable: its plan simply has no rewrites.
-fn mv_reject(root: &Path, source: &Path, target: &Path) -> Option<ErrorData> {
-    let bad = |code: &str, message: String, hint: &str| {
-        Some(ErrorData::new(code, message, Some(hint.into())))
-    };
-    if source == target {
-        let msg = "source and target are the same path".into();
-        return bad("INVALID_ARGUMENT", msg, "pick a different destination");
-    }
-    if !root.join(source).is_file() {
-        let msg = format!("source file '{}' does not exist", core::rel_str(source));
-        return bad(
-            "SOURCE_NOT_FOUND",
-            msg,
-            "check the path or run `jmove check`",
-        );
-    }
-    if root.join(target).exists() {
-        let msg = format!("target path '{}' already exists", core::rel_str(target));
-        return bad(
-            "TARGET_EXISTS",
-            msg,
-            "remove or rename the existing target first",
-        );
-    }
-    // `target` names a file, so `parent()` always yields the directory part.
-    let parent = root.join(target.parent().unwrap_or(Path::new("")));
-    if parent.exists() && !parent.is_dir() {
-        let msg = format!(
-            "target parent of '{}' is not a directory",
-            core::rel_str(target)
-        );
-        return bad(
-            "INVALID_ARGUMENT",
-            msg,
-            "pick a destination inside a directory",
-        );
-    }
-    None
-}
-
 /// Dry-run branch: unified diff for humans, structured preview for agents.
 fn mv_dry_run(root: &Path, json: bool, plan: &MovePlan, git: apply::GitMode) -> Flow<i32> {
     let diff = flow(json, "mv", apply::render_diff(root, plan))?;
@@ -211,9 +190,11 @@ fn mv_dry_run(root: &Path, json: bool, plan: &MovePlan, git: apply::GitMode) -> 
 /// Exit code is `2` when at least one broken import was found, in both the
 /// human and the `--json` mode (the JSON `status` stays `"ok"` — the
 /// command itself succeeded; agents read `total` or the exit code).
-fn check(root: &Path, json: bool) -> Flow<i32> {
+fn check(root: &Path, source_root: Option<&Path>, json: bool) -> Flow<i32> {
     let root = flow(json, "check", root.canonicalize().map_err(JmoveError::from))?;
-    let index = flow(json, "check", Index::build(&root))?;
+    let source_root = flow(json, "check", normalize_scope(&root, source_root))?;
+    let scope = source_root.as_deref();
+    let index = flow(json, "check", Index::build_scoped(&root, scope))?;
     let broken = flow(json, "check", output::broken_imports(&root, &index))?;
     let code = if broken.is_empty() {
         exit::OK
@@ -232,6 +213,21 @@ fn check(root: &Path, json: bool) -> Flow<i32> {
         output::report_check(&broken);
     }
     Ok(code)
+}
+
+/// Validate the global `--source-root`: project-relative, existing dir.
+fn normalize_scope(root: &Path, scope: Option<&Path>) -> JmoveResult<Option<PathBuf>> {
+    let Some(scope) = scope else {
+        return Ok(None);
+    };
+    let rel = core::rel_from_root(root, scope)?;
+    if !root.join(&rel).is_dir() {
+        return Err(JmoveError::InvalidArgument(format!(
+            "--source-root '{}' is not a directory",
+            core::rel_str(&rel)
+        )));
+    }
+    Ok(Some(rel))
 }
 
 /// Unwrap a core result, routing failures through the CLI error channel.

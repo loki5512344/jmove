@@ -71,12 +71,20 @@ pub struct FixDryRunData {
 }
 
 /// `fix` handler: validate rule, index, plan, then dry-run or apply.
-pub fn fix(root: &Path, rule: Option<&str>, dry_run: bool, json: bool) -> Flow<i32> {
+pub fn fix(
+    root: &Path,
+    source_root: Option<&Path>,
+    rule: Option<&str>,
+    dry_run: bool,
+    json: bool,
+) -> Flow<i32> {
     let root = flow(json, "fix", root.canonicalize().map_err(JmoveError::from))?;
+    let source_root = flow(json, "fix", super::normalize_scope(&root, source_root))?;
     if let Some(rejected) = fix_reject(rule) {
         return Err(fail(json, "fix", rejected));
     }
-    let index = flow(json, "fix", Index::build(&root))?;
+    let scope = source_root.as_deref();
+    let index = flow(json, "fix", Index::build_scoped(&root, scope))?;
     let plan = plan_fix(&index, rule);
     if plan.is_empty() {
         if json {

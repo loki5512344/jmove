@@ -4,9 +4,9 @@ Concrete examples for both audiences: humans at a terminal and AI agents
 consuming `--json`. All outputs below are captured from the real binary.
 
 Flags (see `jmove --help`): `mv <source> <target> [--dry-run] [--json]
-[--no-git]`, `check [--json]`, and the global `--root <DIR>`. Paths may be
-relative to the root or absolute inside it; `.gitignore`d files are never
-indexed. Inside a git repo, `mv` of a tracked file uses `git mv` (the
+[--no-git]`, `check [--json]`, and the global `--root <DIR>` /
+`--source-root <DIR>` (index one subtree only — the monorepo disambiguator
+for duplicate Java packages). `.gitignore`d files are never indexed. Inside a git repo, `mv` of a tracked file uses `git mv` (the
 rename is staged); `--no-git` forces a plain filesystem rename.
 Exit codes: `0` ok · `1` operation error · `2` `check` found broken imports.
 

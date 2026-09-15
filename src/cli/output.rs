@@ -11,7 +11,7 @@ use crate::core::index::Index;
 use crate::core::plan::{MovePlan, Rewrite};
 use crate::core::{JmoveResult, rel_str};
 
-use super::json::{BrokenImport, Change, ChangedFile};
+use super::json::{BrokenImport, Change, ChangedFile, ErrorData};
 
 /// `check` stdout line when the project has no broken imports.
 const CHECK_CLEAN: &str = "check: no broken imports found";
@@ -93,6 +93,47 @@ pub fn changed_files(root: &Path, plan: &MovePlan) -> JmoveResult<Vec<ChangedFil
             changes,
         })
         .collect())
+}
+
+/// Pre-flight `mv` validation: `(root, source, target)` are project-relative
+/// and normalized. A file that exists on disk but is absent from the import
+/// index stays moveable: its plan simply has no rewrites.
+#[must_use]
+pub fn mv_reject(root: &Path, source: &Path, target: &Path) -> Option<ErrorData> {
+    let bad = |code: &str, message: String, hint: &str| {
+        Some(ErrorData::new(code, message, Some(hint.into())))
+    };
+    if source == target {
+        let msg = "source and target are the same path".into();
+        return bad("INVALID_ARGUMENT", msg, "pick a different destination");
+    }
+    if !root.join(source).is_file() {
+        let msg = format!("source file '{}' does not exist", rel_str(source));
+        return bad(
+            "SOURCE_NOT_FOUND",
+            msg,
+            "check the path or run `jmove check`",
+        );
+    }
+    if root.join(target).exists() {
+        let msg = format!("target path '{}' already exists", rel_str(target));
+        return bad(
+            "TARGET_EXISTS",
+            msg,
+            "remove or rename the existing target first",
+        );
+    }
+    // `target` names a file, so `parent()` always yields the directory part.
+    let parent = root.join(target.parent().unwrap_or(Path::new("")));
+    if parent.exists() && !parent.is_dir() {
+        let msg = format!("target parent of '{}' is not a directory", rel_str(target));
+        return bad(
+            "INVALID_ARGUMENT",
+            msg,
+            "pick a destination inside a directory",
+        );
+    }
+    None
 }
 
 /// `moved src -> tgt, updated N imports in M files` success summary,

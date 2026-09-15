@@ -18,7 +18,7 @@ kept in sync); Python/Go on the roadmap. Single binary, no LSP needed.
 ### mv — move a file and rewrite its importers
 
 ```
-jmove mv <source> <target> [--root DIR] [--dry-run] [--json] [--no-git]
+jmove mv <source> <target> [--root DIR] [--source-root DIR] [--dry-run] [--json] [--no-git]
 ```
 
 Always run `--dry-run` first and confirm the change set looks right.
@@ -80,6 +80,12 @@ without `--dry-run`. For Java projects the practical loop is: `mv` →
 - `check` never reports unresolved Java imports (jdk, third-party,
   `pkg.*`) as broken — they are external by design, like TS bare
   specifiers.
+- Monorepos with duplicate packages (`guava` vs `android/guava` under one
+  `--root`): the same FQN exists in parallel trees, so resolution picks the
+  sorted-first copy and a move rewrites the wrong files. Pass the global
+  `--source-root DIR` to index (and fix/move) only that subtree; each tree
+  is then self-contained and correct. Without the flag behavior is
+  unchanged; `--source-root` on a non-directory exits 1.
 
 ## Recommended agent workflow
 

@@ -54,6 +54,15 @@ impl Index {
     /// Scan `root`, parse every supported source file and build the graph.
     /// Unreadable or unparseable files are skipped, not fatal.
     pub fn build(root: &Path) -> JmoveResult<Self> {
+        Self::build_scoped(root, None)
+    }
+
+    /// Like [`build`](Self::build), but when `source_root` (project-relative,
+    /// normalized) is `Some`, only files under that subtree are indexed. This
+    /// is the monorepo escape hatch: `guava` vs `android/guava` declare the
+    /// same FQNs, and scoping the index to one self-contained copy makes
+    /// collision-free resolution (and therefore `mv`/`fix` rewrites) exact.
+    pub fn build_scoped(root: &Path, source_root: Option<&Path>) -> JmoveResult<Self> {
         let root = root.canonicalize()?;
         let mut index = Self {
             root,
@@ -62,7 +71,7 @@ impl Index {
             packages: HashMap::new(),
             java_classes: JavaClassIndex::default(),
         };
-        index.scan()?;
+        index.scan(source_root)?;
         // Resolution needs the complete file set (extension/index guessing)
         // and the full package map, so it runs as a second pass.
         let java_classes = JavaClassIndex::new(&index.files, &index.packages);
@@ -83,11 +92,17 @@ impl Index {
     }
 
     // Walk the project and parse each supported source file, staging the
-    // raw records with `target: None` for the resolution pass above.
-    fn scan(&mut self) -> JmoveResult<()> {
-        // Sorted map: deterministic discovery order.
+    // raw records with `target: None` for the resolution pass above. When
+    // `source_root` (project-relative, normalized) is set, only files under
+    // that subtree are indexed — see [`Index::build_scoped`].
+    fn scan(&mut self, source_root: Option<&Path>) -> JmoveResult<()> {
+        // Sorted map: deterministic discovery order. Walking starts at the
+        // scoped subtree when set, so the rest of the monorepo is not even
+        // opened; paths stay root-relative because the prefix removed is
+        // always `self.root`.
         let mut found: BTreeMap<PathBuf, SourceLanguage> = BTreeMap::new();
-        for entry in WalkBuilder::new(&self.root).require_git(false).build() {
+        let base = source_root.map_or(self.root.clone(), |scope| self.root.join(scope));
+        for entry in WalkBuilder::new(base).require_git(false).build() {
             // Walker errors (unreadable dirs, etc.) simply skip the entry.
             let Ok(entry) = entry else { continue };
             if entry.path_is_symlink() || !entry.file_type().is_some_and(|t| t.is_file()) {
