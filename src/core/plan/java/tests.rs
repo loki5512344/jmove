@@ -69,7 +69,7 @@ fn move_between_packages_rewrites_package_and_all_importers() {
         rewrites
             .iter()
             .map(|r| (
-                r.file.display().to_string(),
+                crate::core::rel_str(&r.file),
                 r.old_text.clone(),
                 r.new_text.clone()
             ))

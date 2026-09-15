@@ -3,11 +3,12 @@
 //! Exit codes (mirrored in `docs/SKILL.md`):
 //! `0` success · `1` operation error · `2` broken imports found.
 
+pub mod fix;
 pub mod json;
 pub mod output;
 
 use std::convert::identity;
-use std::path::{Component, Path, PathBuf};
+use std::path::{Path, PathBuf};
 
 use clap::{Parser, Subcommand};
 
@@ -45,10 +46,25 @@ pub enum Command {
         /// Machine-readable JSON output (for AI agents).
         #[arg(long)]
         json: bool,
+        /// Plain filesystem rename even for git-tracked files.
+        #[arg(long)]
+        no_git: bool,
     },
     /// Report broken imports in the project.
     Check {
         /// Machine-readable JSON output.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Auto-fix small import problems (same engine as `mv`).
+    Fix {
+        /// Run only this rule id (see docs/SKILL.md), e.g. java/unused-import.
+        #[arg(long)]
+        rule: Option<String>,
+        /// Preview changes without touching the disk.
+        #[arg(long)]
+        dry_run: bool,
+        /// Machine-readable JSON output (for AI agents).
         #[arg(long)]
         json: bool,
     },
@@ -78,18 +94,32 @@ pub fn run() -> anyhow::Result<i32> {
             target,
             dry_run,
             json,
-        } => mv(&args.root, &source, &target, dry_run, json),
+            no_git,
+        } => mv(&args.root, &source, &target, dry_run, json, no_git),
         Command::Check { json } => check(&args.root, json),
+        Command::Fix {
+            rule,
+            dry_run,
+            json,
+        } => fix::fix(&args.root, rule.as_deref(), dry_run, json),
     };
     // Handlers report their own failures; both arms carry an exit code.
     Ok(outcome.unwrap_or_else(identity))
 }
 
 /// `mv` handler: normalize paths, validate, index, plan, then dry-run or apply.
-fn mv(root: &Path, source: &Path, target: &Path, dry_run: bool, json: bool) -> Flow<i32> {
+fn mv(
+    root: &Path,
+    source: &Path,
+    target: &Path,
+    dry_run: bool,
+    json: bool,
+    no_git: bool,
+) -> Flow<i32> {
+    let git = apply::GitMode::from_no_git(no_git);
     let root = flow(json, "mv", root.canonicalize().map_err(JmoveError::from))?;
-    let source = flow(json, "mv", rel_from_root(&root, source))?;
-    let target = flow(json, "mv", rel_from_root(&root, target))?;
+    let source = flow(json, "mv", core::rel_from_root(&root, source))?;
+    let target = flow(json, "mv", core::rel_from_root(&root, target))?;
     if let Some(rejected) = mv_reject(&root, &source, &target) {
         return Err(fail(json, "mv", rejected));
     }
@@ -97,7 +127,7 @@ fn mv(root: &Path, source: &Path, target: &Path, dry_run: bool, json: bool) -> F
     let index = flow(json, "mv", Index::build(&root))?;
     let plan = flow(json, "mv", plan::plan_move(&index, &source, &target))?;
     if dry_run {
-        return mv_dry_run(&root, json, &plan);
+        return mv_dry_run(&root, json, &plan, git);
     }
     // Line numbers use spans against the *original* contents, so the JSON
     // payload is assembled before the rewrites hit the disk.
@@ -106,12 +136,15 @@ fn mv(root: &Path, source: &Path, target: &Path, dry_run: bool, json: bool) -> F
     } else {
         Vec::new()
     };
-    flow(json, "mv", apply::apply(&root, &plan))?;
+    let applied = flow(json, "mv", apply::apply(&root, &plan, git))?;
 
     if json {
-        json::print(&Envelope::ok("mv", MvData::new(&plan, changed)));
+        json::print(&Envelope::ok(
+            "mv",
+            MvData::new(&plan, changed, applied.via_git),
+        ));
     } else {
-        println!("{}", output::mv_summary(&plan));
+        println!("{}", output::mv_summary(&plan, applied.via_git));
     }
     Ok(exit::OK)
 }
@@ -127,7 +160,7 @@ fn mv_reject(root: &Path, source: &Path, target: &Path) -> Option<ErrorData> {
         return bad("INVALID_ARGUMENT", msg, "pick a different destination");
     }
     if !root.join(source).is_file() {
-        let msg = format!("source file '{}' does not exist", source.display());
+        let msg = format!("source file '{}' does not exist", core::rel_str(source));
         return bad(
             "SOURCE_NOT_FOUND",
             msg,
@@ -135,7 +168,7 @@ fn mv_reject(root: &Path, source: &Path, target: &Path) -> Option<ErrorData> {
         );
     }
     if root.join(target).exists() {
-        let msg = format!("target path '{}' already exists", target.display());
+        let msg = format!("target path '{}' already exists", core::rel_str(target));
         return bad(
             "TARGET_EXISTS",
             msg,
@@ -145,7 +178,10 @@ fn mv_reject(root: &Path, source: &Path, target: &Path) -> Option<ErrorData> {
     // `target` names a file, so `parent()` always yields the directory part.
     let parent = root.join(target.parent().unwrap_or(Path::new("")));
     if parent.exists() && !parent.is_dir() {
-        let msg = format!("target parent of '{}' is not a directory", target.display());
+        let msg = format!(
+            "target parent of '{}' is not a directory",
+            core::rel_str(target)
+        );
         return bad(
             "INVALID_ARGUMENT",
             msg,
@@ -156,10 +192,14 @@ fn mv_reject(root: &Path, source: &Path, target: &Path) -> Option<ErrorData> {
 }
 
 /// Dry-run branch: unified diff for humans, structured preview for agents.
-fn mv_dry_run(root: &Path, json: bool, plan: &MovePlan) -> Flow<i32> {
+fn mv_dry_run(root: &Path, json: bool, plan: &MovePlan, git: apply::GitMode) -> Flow<i32> {
     let diff = flow(json, "mv", apply::render_diff(root, plan))?;
+    let via_git = apply::would_use_git(root, &plan.source, git);
     if json {
-        json::print(&Envelope::dry_run("mv", MvDryRunData::new(plan, diff)));
+        json::print(&Envelope::dry_run(
+            "mv",
+            MvDryRunData::new(plan, diff, via_git),
+        ));
     } else {
         print!("{diff}");
     }
@@ -207,42 +247,4 @@ fn fail(json: bool, operation: &'static str, err: ErrorData) -> i32 {
         output::print_error(&err.message, err.hint.as_deref());
     }
     exit::ERROR
-}
-
-/// Convert a user path to a normalized project-relative path. Relative
-/// paths are taken against `root`; absolute ones must live underneath it.
-fn rel_from_root(root: &Path, path: &Path) -> JmoveResult<PathBuf> {
-    let joined = if path.is_absolute() {
-        path.into()
-    } else {
-        root.join(path)
-    };
-    let outside = || {
-        JmoveError::InvalidArgument(format!(
-            "path '{}' is outside the project root",
-            path.display()
-        ))
-    };
-    let abs = collapse(&joined);
-    let rel = abs.strip_prefix(root).map_err(|_| outside())?;
-    core::normalize_rel_path(rel).ok_or_else(|| {
-        JmoveError::InvalidArgument(format!("invalid project path '{}'", path.display()))
-    })
-}
-
-/// Lexically normalize a path: drop `.` segments, apply `..` where possible.
-fn collapse(path: &Path) -> PathBuf {
-    let mut stack: Vec<Component<'_>> = Vec::new();
-    for comp in path.components() {
-        match comp {
-            Component::CurDir => {}
-            Component::ParentDir => {
-                if stack.last() != Some(&Component::ParentDir) {
-                    stack.pop();
-                }
-            }
-            other => stack.push(other),
-        }
-    }
-    stack.into_iter().collect()
 }

@@ -15,7 +15,7 @@ use std::ops::Range;
 use std::path::{Path, PathBuf};
 
 use crate::core::index::Index;
-use crate::core::{JmoveError, JmoveResult, normalize_rel_path};
+use crate::core::{Edit, JmoveError, JmoveResult, normalize_rel_path, rel_str};
 use crate::parser::SourceLanguage;
 
 /// One in-file replacement of an import specifier. Only the specifier text
@@ -30,6 +30,16 @@ pub struct Rewrite {
     pub old_text: String,
     /// Specifier after the move.
     pub new_text: String,
+}
+
+impl From<&Rewrite> for Edit {
+    fn from(rewrite: &Rewrite) -> Self {
+        Edit {
+            span: rewrite.span.clone(),
+            old_text: rewrite.old_text.clone(),
+            new_text: rewrite.new_text.clone(),
+        }
+    }
 }
 
 /// Complete plan for moving `source` to `target`.
@@ -60,7 +70,7 @@ pub fn plan_move(index: &Index, source: &Path, target: &Path) -> JmoveResult<Mov
     };
     let (source, target) = (rel("source path", source)?, rel("target path", target)?);
     if !index.files.contains(&source) {
-        let s = source.display();
+        let s = rel_str(&source);
         return Err(JmoveError::InvalidArgument(format!(
             "source '{s}' is not an indexed file"
         )));
@@ -71,7 +81,7 @@ pub fn plan_move(index: &Index, source: &Path, target: &Path) -> JmoveResult<Mov
         ));
     }
     if index.files.contains(&target) {
-        let t = target.display();
+        let t = rel_str(&target);
         return Err(JmoveError::PlanRejected(format!(
             "target '{t}' already exists"
         )));
@@ -141,7 +151,7 @@ mod tests {
         let keys: Vec<(String, usize)> = plan
             .rewrites
             .iter()
-            .map(|r| (r.file.display().to_string(), r.span.start))
+            .map(|r| (crate::core::rel_str(&r.file), r.span.start))
             .collect();
         assert_eq!(
             keys,

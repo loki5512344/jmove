@@ -12,6 +12,8 @@ use std::path::{Path, PathBuf};
 
 use tree_sitter::{Node, Parser, Tree};
 
+pub mod rules;
+
 use super::{ImportRecord, Language, PackageDecl, SourceLanguage};
 use crate::core::index::FileSet;
 
@@ -79,7 +81,12 @@ impl Language for TreeSitterJava {
         tree.root_node()
             .children(&mut cursor)
             .find(|child| child.kind() == "package_declaration")
-            .and_then(|decl| find_child_kind(decl, "scoped_identifier"))
+            // A dotted name parses as `scoped_identifier`; a single-segment
+            // package (`package p;`) has no dots and is a bare `identifier`.
+            .and_then(|decl| {
+                find_child_kind(decl, "scoped_identifier")
+                    .or_else(|| find_child_kind(decl, "identifier"))
+            })
             .map(|name| PackageDecl {
                 name: text(name, source).to_owned(),
                 span: name.start_byte()..name.end_byte(),
@@ -105,10 +112,19 @@ fn record(node: Node, source: &str) -> ImportRecord {
     }
 }
 
-fn text<'a>(node: Node, source: &'a str) -> &'a str {
+fn text<'a>(node: Node<'a>, source: &'a str) -> &'a str {
     source
         .get(node.start_byte()..node.end_byte())
         .unwrap_or_default()
+}
+
+// Extend a statement end over exactly one `\n` or `\r\n` line terminator.
+pub(super) fn line_end(source: &[u8], end: usize) -> usize {
+    match (source.get(end), source.get(end + 1)) {
+        (Some(b'\r'), Some(b'\n')) => end + 2,
+        (Some(b'\n'), _) => end + 1,
+        _ => end,
+    }
 }
 
 /// Map from every indexed Java class's declared FQN to its file. A file
@@ -118,6 +134,8 @@ fn text<'a>(node: Node, source: &'a str) -> &'a str {
 #[derive(Debug, Default)]
 pub struct JavaClassIndex {
     classes: HashMap<String, PathBuf>,
+    // simple name -> sorted FQNs declaring it (missing-import lookups).
+    by_simple: HashMap<String, Vec<String>>,
 }
 
 impl JavaClassIndex {
@@ -136,7 +154,18 @@ impl JavaClassIndex {
                 .entry(format!("{}.{stem}", decl.name))
                 .or_insert(file);
         }
-        Self { classes }
+        let mut by_simple: HashMap<String, Vec<String>> = HashMap::new();
+        for fqn in classes.keys() {
+            let simple = fqn.rsplit('.').next().unwrap_or(fqn);
+            by_simple
+                .entry(simple.to_owned())
+                .or_default()
+                .push(fqn.clone());
+        }
+        for fqns in by_simple.values_mut() {
+            fqns.sort();
+        }
+        Self { classes, by_simple }
     }
 
     /// Resolve a Java import `specifier` to an indexed file. Exact FQN
@@ -152,95 +181,14 @@ impl JavaClassIndex {
         let owner = specifier.rsplit_once('.')?.0;
         self.classes.get(owner).map(PathBuf::as_path)
     }
+
+    /// Every indexed FQN whose simple name is `simple`, sorted. Empty for
+    /// jdk/third-party names, which the index never contains.
+    #[must_use]
+    pub fn candidates(&self, simple: &str) -> &[String] {
+        self.by_simple.get(simple).map_or(&[], Vec::as_slice)
+    }
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn imports(source: &str) -> Vec<ImportRecord> {
-        TreeSitterJava::new().extract_imports(source)
-    }
-
-    #[test]
-    fn extracts_package_with_exact_span() {
-        let src = "package com.example.utils;\n\npublic class P {}\n";
-        let decl = TreeSitterJava::new().extract_package(src).expect("package");
-        assert_eq!(decl.name, "com.example.utils");
-        assert_eq!(&src[decl.span.clone()], "com.example.utils");
-    }
-
-    #[test]
-    fn package_in_comment_is_not_captured() {
-        let src = "// package com.example;\npublic class P {}\n";
-        assert!(TreeSitterJava::new().extract_package(src).is_none());
-    }
-
-    #[test]
-    fn extracts_single_type_and_static_imports() {
-        let src = "package p;\nimport a.b.User;\nimport static a.b.User.create;\n";
-        let recs = imports(src);
-        assert_eq!(recs.len(), 2);
-        assert_eq!(recs[0].specifier, "a.b.User");
-        assert_eq!(&src[recs[0].span.clone()], "a.b.User");
-        assert_eq!(recs[1].specifier, "a.b.User.create");
-        assert_eq!(&src[recs[1].span.clone()], "a.b.User.create");
-        assert!(recs.iter().all(|r| !r.is_dynamic));
-    }
-
-    #[test]
-    fn on_demand_imports_are_not_extracted() {
-        let src = "package p;\nimport java.util.*;\nimport a.b.User;\n";
-        let recs = imports(src);
-        assert_eq!(recs.len(), 1);
-        assert_eq!(recs[0].specifier, "a.b.User");
-    }
-
-    #[test]
-    fn imports_inside_nested_types_are_still_top_level() {
-        let src = "package p;\nclass A { }\nimport q.B;\n";
-        assert_eq!(imports(src).len(), 1);
-    }
-
-    #[test]
-    fn class_index_maps_package_and_stem() {
-        let mut files = FileSet::default();
-        files.add(PathBuf::from("src/main/java/com/example/utils/Parser.java"));
-        files.add(PathBuf::from("src/Main.java"));
-        let mut packages = HashMap::new();
-        packages.insert(
-            PathBuf::from("src/main/java/com/example/utils/Parser.java"),
-            PackageDecl {
-                name: "com.example.utils".into(),
-                span: 0..0,
-            },
-        );
-        let classes = JavaClassIndex::new(&files, &packages);
-        assert_eq!(
-            classes.resolve("com.example.utils.Parser"),
-            Some(Path::new("src/main/java/com/example/utils/Parser.java"))
-        );
-        // default package: un-importable, no entry
-        assert_eq!(classes.classes.len(), 1);
-    }
-
-    #[test]
-    fn resolve_handles_exact_and_member_imports() {
-        let mut classes = HashMap::new();
-        classes.insert(
-            "com.example.Parser".to_owned(),
-            PathBuf::from("src/com/example/Parser.java"),
-        );
-        let index = JavaClassIndex { classes };
-        assert_eq!(
-            index.resolve("com.example.Parser"),
-            Some(Path::new("src/com/example/Parser.java"))
-        );
-        assert_eq!(
-            index.resolve("com.example.Parser.parse"),
-            Some(Path::new("src/com/example/Parser.java"))
-        );
-        assert_eq!(index.resolve("java.util.List"), None);
-        assert_eq!(index.resolve("Parser"), None);
-    }
-}
+mod tests;

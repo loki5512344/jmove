@@ -45,6 +45,9 @@ pub struct Index {
     pub imports: HashMap<PathBuf, Vec<ResolvedImport>>,
     /// Declared `package` of each Java file that has one.
     pub packages: HashMap<PathBuf, PackageDecl>,
+    /// FQN → file map for every indexed Java class; the fix rules use it
+    /// for candidate lookup (empty when the project has no Java sources).
+    pub java_classes: JavaClassIndex,
 }
 
 impl Index {
@@ -57,6 +60,7 @@ impl Index {
             files: FileSet::default(),
             imports: HashMap::new(),
             packages: HashMap::new(),
+            java_classes: JavaClassIndex::default(),
         };
         index.scan()?;
         // Resolution needs the complete file set (extension/index guessing)
@@ -74,6 +78,7 @@ impl Index {
                 };
             }
         }
+        index.java_classes = java_classes;
         Ok(index)
     }
 

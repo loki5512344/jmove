@@ -7,8 +7,8 @@
 
 use serde::Serialize;
 
-use crate::core::JmoveError;
 use crate::core::plan::MovePlan;
+use crate::core::{JmoveError, rel_str};
 
 use super::output;
 
@@ -98,6 +98,10 @@ impl ErrorData {
                 "PLAN_REJECTED",
                 "run `jmove check --json` to inspect the import graph",
             ),
+            JmoveError::Git(_) => (
+                "GIT_ERROR",
+                "retry with --no-git to move without touching git",
+            ),
         };
         Self::new(code, err.to_string(), Some(hint.to_owned()))
     }
@@ -136,18 +140,21 @@ pub struct MvData {
     pub moved: usize,
     /// Total specifiers rewritten across all importers.
     pub updated_imports: usize,
+    /// Rename backend: `"git"` (staged in the index) or `"fs"`.
+    pub moved_via: &'static str,
 }
 
 impl MvData {
     /// Assemble the payload from an applied plan and its change details.
     #[must_use]
-    pub fn new(plan: &MovePlan, changed_files: Vec<ChangedFile>) -> Self {
+    pub fn new(plan: &MovePlan, changed_files: Vec<ChangedFile>, via_git: bool) -> Self {
         Self {
-            source: plan.source.display().to_string(),
-            target: plan.target.display().to_string(),
+            source: rel_str(&plan.source),
+            target: rel_str(&plan.target),
             changed_files,
             moved: 1,
             updated_imports: plan.rewrites.len(),
+            moved_via: if via_git { "git" } else { "fs" },
         }
     }
 }
@@ -166,21 +173,24 @@ pub struct MvDryRunData {
     pub affected_files: Vec<String>,
     /// Unified diff (rewrites + rename) of the whole plan.
     pub diff: String,
+    /// Rename backend a real run would use: `"git"` or `"fs"`.
+    pub would_move_via: &'static str,
 }
 
 impl MvDryRunData {
     /// Assemble the preview payload from a plan and its rendered diff.
     #[must_use]
-    pub fn new(plan: &MovePlan, diff: String) -> Self {
+    pub fn new(plan: &MovePlan, diff: String, via_git: bool) -> Self {
         Self {
-            would_move: plan.source.display().to_string(),
-            target: plan.target.display().to_string(),
+            would_move: rel_str(&plan.source),
+            target: rel_str(&plan.target),
             would_update: plan.rewrites.len(),
             affected_files: output::group_by_file(&plan.rewrites)
                 .into_iter()
-                .map(|(file, _)| file.display().to_string())
+                .map(|(file, _)| rel_str(file))
                 .collect(),
             diff,
+            would_move_via: if via_git { "git" } else { "fs" },
         }
     }
 }

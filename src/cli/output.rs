@@ -7,9 +7,9 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-use crate::core::JmoveResult;
 use crate::core::index::Index;
 use crate::core::plan::{MovePlan, Rewrite};
+use crate::core::{JmoveResult, rel_str};
 
 use super::json::{BrokenImport, Change, ChangedFile};
 
@@ -57,7 +57,7 @@ pub fn broken_imports(root: &Path, index: &Index) -> JmoveResult<Vec<BrokenImpor
             }
             let text = read_file(root, file)?;
             broken.push(BrokenImport {
-                file: file.display().to_string(),
+                file: rel_str(file),
                 line: line_of(&text, import.record.span.start),
                 import: import.record.specifier.clone(),
                 reason: "file_not_found",
@@ -89,21 +89,23 @@ pub fn changed_files(root: &Path, plan: &MovePlan) -> JmoveResult<Vec<ChangedFil
     Ok(per_file
         .into_iter()
         .map(|(path, changes)| ChangedFile {
-            path: path.display().to_string(),
+            path: rel_str(path),
             changes,
         })
         .collect())
 }
 
-/// `moved src -> tgt, updated N imports in M files` success summary.
+/// `moved src -> tgt, updated N imports in M files` success summary,
+/// noting when the rename went through `git mv`.
 #[must_use]
-pub fn mv_summary(plan: &MovePlan) -> String {
+pub fn mv_summary(plan: &MovePlan, via_git: bool) -> String {
     let imports = plan.rewrites.len();
     let files = group_by_file(&plan.rewrites).len();
+    let git = if via_git { " (via git mv)" } else { "" };
     format!(
-        "moved {} -> {}, updated {} {} in {} {}",
-        plan.source.display(),
-        plan.target.display(),
+        "moved {} -> {}{git}, updated {} {} in {} {}",
+        rel_str(&plan.source),
+        rel_str(&plan.target),
         imports,
         plural(imports, "import"),
         files,
@@ -136,7 +138,7 @@ pub fn print_error(message: &str, hint: Option<&str>) {
 }
 
 /// `N noun` with a naive English plural.
-fn plural(count: usize, noun: &str) -> String {
+pub(crate) fn plural(count: usize, noun: &str) -> String {
     if count == 1 {
         noun.to_owned()
     } else {

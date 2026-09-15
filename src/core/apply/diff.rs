@@ -1,29 +1,44 @@
-//! Unified-diff rendering of a plan, used by `mv --dry-run`.
+//! Unified-diff rendering of edit plans, used by `--dry-run` of every
+//! command: [`render_edits_diff`] is the generic engine over per-file edit
+//! groups, [`render_diff`] adds the `mv` rename line.
 
 use similar::TextDiff;
 
-use crate::core::JmoveResult;
+use std::collections::BTreeMap;
+use std::path::{Path, PathBuf};
+
+use crate::core::Edit;
 use crate::core::apply::fsops::{group_by_file, rewrite_bytes};
 use crate::core::plan::MovePlan;
-use std::path::Path;
+use crate::core::{JmoveResult, rel_str};
 
 /// Render the plan as a unified diff per rewritten file plus a final
 /// `move <source> -> <target>` line, for dry-run. A plan without rewrites
 /// renders the empty string.
 pub fn render_diff(root: &Path, plan: &MovePlan) -> JmoveResult<String> {
+    let mut out = render_edits_diff(root, &group_by_file(plan))?;
+    if !out.is_empty() {
+        let (src, dst) = (rel_str(&plan.source), rel_str(&plan.target));
+        out.push_str(&format!("move {src} -> {dst}\n"));
+    }
+    Ok(out)
+}
+
+/// Render pre-grouped edits (the `fix` dry-run shape) as one unified diff
+/// per changed file; files with empty edit groups render nothing.
+pub fn render_edits_diff(
+    root: &Path,
+    by_file: &BTreeMap<PathBuf, Vec<Edit>>,
+) -> JmoveResult<String> {
     let mut out = String::new();
-    for (file, rewrites) in group_by_file(plan) {
-        let original = std::fs::read(root.join(&file))?;
-        let patched = rewrite_bytes(&original, &rewrites)?;
-        let name = file.display().to_string();
+    for (file, edits) in by_file {
+        let original = std::fs::read(root.join(file))?;
+        let patched = rewrite_bytes(file, &original, edits)?;
+        let name = rel_str(file);
         let old = String::from_utf8_lossy(&original);
         let new = String::from_utf8_lossy(&patched);
         let text = TextDiff::from_lines(&old, &new);
         out.push_str(&text.unified_diff().header(&name, &name).to_string());
-    }
-    if !out.is_empty() {
-        let (src, dst) = (plan.source.display(), plan.target.display());
-        out.push_str(&format!("move {src} -> {dst}\n"));
     }
     Ok(out)
 }

@@ -14,7 +14,7 @@ use std::path::{Path, PathBuf};
 
 use crate::core::index::Index;
 use crate::core::plan::Rewrite;
-use crate::core::{JmoveError, JmoveResult};
+use crate::core::{JmoveError, JmoveResult, rel_str};
 
 /// Rewrite set for moving `source.java` to `target.java` (both
 /// project-relative, validated by the caller).
@@ -28,7 +28,7 @@ pub(super) fn java_rewrites(
     if target.extension().is_none_or(|e| e != "java") {
         return Err(rejected(format!(
             "'{}' is a .java file, the target must keep the .java extension",
-            source.display()
+            rel_str(source)
         )));
     }
     let sdir = source.parent().unwrap_or(Path::new(""));
@@ -40,7 +40,7 @@ pub(super) fn java_rewrites(
         } else {
             Err(rejected(format!(
                 "'{}' has no `package` declaration (default package); it can only be renamed inside its directory",
-                source.display()
+                rel_str(source)
             )))
         };
     };
@@ -50,15 +50,15 @@ pub(super) fn java_rewrites(
     if !sdir.ends_with(Path::new(&pkg_path)) {
         return Err(rejected(format!(
             "package '{pkg}' does not match directory '{}'",
-            sdir.display()
+            rel_str(sdir)
         )));
     }
     let src_root = strip_package_dir(sdir, pkg);
     let rest = tdir.strip_prefix(&src_root).map_err(|_| {
         rejected(format!(
             "target directory '{}' is outside the Java source root '{}'",
-            tdir.display(),
-            src_root.display()
+            rel_str(tdir),
+            rel_str(&src_root)
         ))
     })?;
     let new_pkg = package_of(rest);
@@ -124,7 +124,7 @@ fn file_stem(path: &Path) -> JmoveResult<String> {
         .and_then(|s| s.to_str())
         .map(str::to_owned)
         .ok_or_else(|| {
-            JmoveError::InvalidArgument(format!("invalid file name '{}'", path.display()))
+            JmoveError::InvalidArgument(format!("invalid file name '{}'", rel_str(path)))
         })
 }
 
