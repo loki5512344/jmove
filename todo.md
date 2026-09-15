@@ -75,10 +75,12 @@ AI оставляем СНАРУЖИ: при неоднозначности jmov
       явных импорта корректно, НО javac упал: сам перенесённый файл ссылался на соседний
       `GwtCompatible` БЕЗ импорта (тот же пакет) → после mv ссылка битая. jmove в v1 осознанно
       НЕ добавляет импорты. Это главный driver для fix/missing-import из Phase 1.6 выше
-- [ ] (после fix) повторить обе перемещения как `mv` + авто-`fix` и добить compile до SUCCESS
-      (паттерн воспроизведён и закрыт локально: mv файла с bare-ссылкой на соседний пакет →
-      `fix` добавил импорт → javac SUCCESS; на реальном guava ещё не прогонялось)
-- [x] Индексация в monorepo с дублями пакетов (guava vs android/guava в одном --root):
+- [x] Обе перемещения повторены как `mv` + авто-`fix`, compile = BUILD SUCCESS (guava main, JDK21):
+      VisibleForTesting annotations→annotations.testing: mv без --source-root давал 1 правку (62 потеряны!),
+      с --source-root guava — 63/63 через git mv; fix добавил в перенесённый файл
+      `import com.google.common.annotations.GwtCompatible` (тот самый разрыв v1) + 36 import-order
+      (сошёлся за 2 прогона); Primitives primitives→util: 5 правок + fix; `jmove check` = 0 broken
+- [x] Индексация в monorepo с дублями пакетов — ПРОВЕРЕНО НА guava (см. выше):
       глобальный `--source-root DIR` — индексирует (mv/check/fix) только поддерево,
       FQN-коллизии исчезают, соседнее дерево не трогается; авто-определение по mv-цели
       осознанно НЕ делаем (явный флаг предсказуемее, см. KISS)
