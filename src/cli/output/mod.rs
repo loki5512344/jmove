@@ -13,7 +13,7 @@ use crate::core::{JmoveResult, rel_str};
 
 mod check;
 
-use super::json::{Change, ChangedFile, ErrorData};
+use super::json::ErrorData;
 
 pub use check::{
     BrokenImport, CheckData, NameMismatch, broken_imports, name_mismatches, report_check,
@@ -24,15 +24,27 @@ pub(crate) fn read_file(root: &Path, rel: &Path) -> JmoveResult<String> {
     Ok(std::fs::read_to_string(root.join(rel))?)
 }
 
-/// 1-based line containing the byte offset `byte` in `source`.
-#[must_use]
-pub fn line_of(source: &str, byte: usize) -> usize {
-    let upto = source.len().min(byte);
-    source.as_bytes()[..upto]
-        .iter()
-        .filter(|b| **b == b'\n')
-        .count()
-        + 1
+/// Re-exported so `output::line_of` call sites stay stable.
+pub use crate::core::line_of;
+
+/// One rewritten import inside a changed file.
+#[derive(Debug, serde::Serialize)]
+pub struct Change {
+    /// 1-based line of the rewritten specifier.
+    pub line: usize,
+    /// Specifier text before the move.
+    pub old: String,
+    /// Specifier text after the move.
+    pub new: String,
+}
+
+/// A file whose imports were rewritten, with line-level change details.
+#[derive(Debug, serde::Serialize)]
+pub struct ChangedFile {
+    /// Project-relative path of the importer.
+    pub path: String,
+    /// Rewritten specifiers, in source order.
+    pub changes: Vec<Change>,
 }
 
 /// Group rewrites by importer file; files in sorted order, rewrites of one
@@ -145,6 +157,32 @@ pub fn print_error(message: &str, hint: Option<&str>) {
     eprintln!("jmove: {message}");
     if let Some(hint) = hint {
         eprintln!("  hint: {hint}");
+    }
+}
+
+/// Human warning block for non-import references (stderr, after the mv
+/// result, so stdout stays clean for scripts). Silent when there are none.
+pub fn report_refs(refs: &[crate::core::refs::NonImportRef]) {
+    if refs.is_empty() {
+        return;
+    }
+    eprintln!(
+        "warning: {} non-import reference {} may need manual fixing:",
+        refs.len(),
+        if refs.len() == 1 {
+            "to the moved file"
+        } else {
+            "s to moved files"
+        }
+    );
+    for r in refs.iter().take(10) {
+        eprintln!("  {}:{}", r.file, r.line);
+    }
+    if refs.len() > 10 {
+        eprintln!(
+            "  ... and {} more (see --json non_import_refs)",
+            refs.len() - 10
+        );
     }
 }
 

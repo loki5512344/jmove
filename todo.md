@@ -96,7 +96,9 @@ AI оставляем СНАРУЖИ: при неоднозначности jmov
 - [ ] Параллельная индексация через rayon
 - [x] --git интеграция (git mv для stage/истории): auto для tracked файлов, --no-git флаг, moved_via/would_move_via в --json
 - [x] Перенос директорий целиком (mv папки): зеркальный batch-move всех индексируемых файлов, merged rewrites, prune пустых исходных каталогов, left_behind для неиндексируемых
-- [ ] Предупреждения о не-import ссылках: package.json exports, jest mocks, tsconfig includes, markdown links
+- [x] Предупреждения о не-import ссылках: скан text/md/json/yaml/html + строк в коде на path/module/specifier/dir токены (с word-границами);
+      никогда не правит, только stderr + non_import_refs[] в --json; lockfiles/hidden/>512KiB пропускаются.
+      Ограничение v1: ссылки из чужих директорий в своей относительной форме ('./sum' из __tests__/ при переносе 'lib/sum') не ловятся
 - [ ] prettier интеграция после rewrite (по желанию)
 
 ## Phase 3

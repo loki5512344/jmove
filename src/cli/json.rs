@@ -8,9 +8,11 @@
 use serde::Serialize;
 
 use crate::core::plan::MovePlan;
+use crate::core::refs::NonImportRef;
 use crate::core::{JmoveError, rel_str};
 
-use super::output;
+use super::output::ChangedFile;
+use super::output::{self};
 
 /// Top-level envelope for every `--json` response.
 #[derive(Debug, Serialize)]
@@ -107,26 +109,6 @@ impl ErrorData {
     }
 }
 
-/// One rewritten import inside a changed file.
-#[derive(Debug, Serialize)]
-pub struct Change {
-    /// 1-based line of the rewritten specifier.
-    pub line: usize,
-    /// Specifier text before the move.
-    pub old: String,
-    /// Specifier text after the move.
-    pub new: String,
-}
-
-/// A file whose imports were rewritten, with line-level change details.
-#[derive(Debug, Serialize)]
-pub struct ChangedFile {
-    /// Project-relative path of the importer.
-    pub path: String,
-    /// Rewritten specifiers, in source order.
-    pub changes: Vec<Change>,
-}
-
 /// Success payload of `mv --json` (flattened under `status: "ok"`).
 #[derive(Debug, Serialize)]
 pub struct MvData {
@@ -142,6 +124,9 @@ pub struct MvData {
     pub updated_imports: usize,
     /// Rename backend: `"git"` (every rename staged in the index) or `"fs"`.
     pub moved_via: &'static str,
+    /// Non-import textual references left unfixed (omitted when none).
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub non_import_refs: Vec<NonImportRef>,
     /// Directory moves only: each `(from, to)` relocation (omitted for file moves).
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub moved_files: Vec<FileMoveData>,
@@ -180,7 +165,12 @@ fn dir_moves(plan: &MovePlan) -> Vec<FileMoveData> {
 impl MvData {
     /// Assemble the payload from an applied plan and its change details.
     #[must_use]
-    pub fn new(plan: &MovePlan, changed_files: Vec<ChangedFile>, via_git: bool) -> Self {
+    pub fn new(
+        plan: &MovePlan,
+        changed_files: Vec<ChangedFile>,
+        via_git: bool,
+        non_import_refs: Vec<NonImportRef>,
+    ) -> Self {
         Self {
             source: rel_str(&plan.source),
             target: rel_str(&plan.target),
@@ -188,6 +178,7 @@ impl MvData {
             moved: plan.moves.len(),
             updated_imports: plan.rewrites.len(),
             moved_via: if via_git { "git" } else { "fs" },
+            non_import_refs,
             // A single-file move keeps the old contract: no extra fields.
             moved_files: dir_moves(plan),
             left_behind: plan.left_behind.iter().map(|p| rel_str(p)).collect(),
@@ -211,6 +202,9 @@ pub struct MvDryRunData {
     pub diff: String,
     /// Rename backend a real run would use: `"git"` or `"fs"`.
     pub would_move_via: &'static str,
+    /// Non-import references a real run would leave unfixed.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub non_import_refs: Vec<NonImportRef>,
     /// Directory moves only: every relocation that would happen.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub would_move_files: Vec<FileMoveData>,
@@ -219,7 +213,12 @@ pub struct MvDryRunData {
 impl MvDryRunData {
     /// Assemble the preview payload from a plan and its rendered diff.
     #[must_use]
-    pub fn new(plan: &MovePlan, diff: String, via_git: bool) -> Self {
+    pub fn new(
+        plan: &MovePlan,
+        diff: String,
+        via_git: bool,
+        non_import_refs: Vec<NonImportRef>,
+    ) -> Self {
         Self {
             would_move: rel_str(&plan.source),
             target: rel_str(&plan.target),
@@ -231,6 +230,7 @@ impl MvDryRunData {
             diff,
             would_move_via: if via_git { "git" } else { "fs" },
             would_move_files: dir_moves(plan),
+            non_import_refs,
         }
     }
 }

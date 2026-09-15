@@ -47,6 +47,13 @@ while the new file stays inside the mapped tree and falls back to a
 relative specifier otherwise. `extends` chains and 2nd+ candidate lists
 are not followed (v1); an invalid tsconfig silently means "no aliases".
 
+Non-import references: before writing, `mv` scans markdown/config/text
+files and source strings for mentions of moved paths and old specifiers.
+Such references are never rewritten (each format has its own semantics);
+they are reported as `non_import_refs[]` (`file`, `line`, `token`, `kind`,
+`text`) in `mv --json` — dry-run included — and on stderr for humans.
+Exit code never changes; surface the list to the user.
+
 ### check — find broken imports and Java layout errors
 
 ```

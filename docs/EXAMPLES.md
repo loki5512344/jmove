@@ -165,15 +165,13 @@ $ jmove mv lib/sum.ts utils/sum.ts --dry-run --json
   "would_move": "lib/sum.ts",
   "target": "utils/sum.ts",
   "would_update": 1,
-  "affected_files": [
-    "app.ts"
-  ],
+  "affected_files": ["app.ts"],
   "would_move_via": "fs",
   "diff": "--- app.ts\n+++ app.ts\n@@ -1,4 +1,4 @@\n-import { sum } from \"./lib/sum\";\n+import { sum } from \"./utils/sum\";\n..."
 }
 ```
 
-Review `affected_files`; abort and ask the user if the blast radius is
+Review `affected_files` and `non_import_refs`; abort and ask the user if the blast radius is
 unexpected.
 
 ### 2. Apply
@@ -188,25 +186,26 @@ $ jmove mv lib/sum.ts utils/sum.ts --json
   "changed_files": [
     {
       "path": "app.ts",
-      "changes": [
-        {
-          "line": 1,
-          "old": "./lib/sum",
-          "new": "./utils/sum"
-        }
-      ]
+      "changes": [{ "line": 1, "old": "./lib/sum", "new": "./utils/sum" }]
     }
   ],
   "moved": 1,
   "updated_imports": 1,
-  "moved_via": "fs"
+  "moved_via": "fs",
+  "non_import_refs": [
+    { "file": "README.md", "line": 1, "token": "lib/sum.ts",
+      "kind": "path", "text": "Use [sum](./lib/sum.ts) via `lib/sum`." }
+  ]
 }
 ```
 
 `changed_files[].changes[]` lists every rewritten specifier with its
 1-based line; `moved` and `updated_imports` are the counters,
 `moved_via` tells whether the rename went through git (`"git"`, staged)
-or the plain filesystem (`"fs"`).
+or the plain filesystem (`"fs"`). `non_import_refs` (omitted when empty,
+also present in dry-run) names references the import graph cannot see —
+markdown links, `package.json` fields, `jest.mock` strings. jmove never
+edits those; report them to the user.
 
 ### 3. Verify
 

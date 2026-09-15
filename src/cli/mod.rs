@@ -15,6 +15,7 @@ use clap::{Parser, Subcommand};
 use crate::core::apply;
 use crate::core::index::Index;
 use crate::core::plan::{self, MovePlan};
+use crate::core::refs;
 use crate::core::{self, JmoveError, JmoveResult};
 
 use json::{Envelope, ErrorData, MvData, MvDryRunData};
@@ -106,7 +107,7 @@ pub fn run() -> anyhow::Result<i32> {
             &target,
             dry_run,
             json,
-            no_git,
+            apply::GitMode::from_no_git(no_git),
         ),
         Command::Check { json } => check(&args.root, args.source_root.as_deref(), json),
         Command::Fix {
@@ -133,11 +134,10 @@ fn mv(
     target: &Path,
     dry_run: bool,
     json: bool,
-    no_git: bool,
+    git: apply::GitMode,
 ) -> Flow<i32> {
-    let git = apply::GitMode::from_no_git(no_git);
     let root = flow(json, "mv", root.canonicalize().map_err(JmoveError::from))?;
-    let source_root = flow(json, "mv", normalize_scope(&root, source_root))?;
+    let source_root = flow(json, "mv", Index::normalize_scope(&root, source_root))?;
     let source = flow(json, "mv", core::rel_from_root(&root, source))?;
     let target = flow(json, "mv", core::rel_from_root(&root, target))?;
     if let Some(rejected) = output::mv_reject(&root, &source, &target) {
@@ -147,11 +147,11 @@ fn mv(
     let scope = source_root.as_deref();
     let index = flow(json, "mv", Index::build_scoped(&root, scope))?;
     let plan = flow(json, "mv", plan::plan_move(&index, &source, &target))?;
+    let hidden = refs::scan(&root, &index, &plan);
     if dry_run {
-        return mv_dry_run(&root, json, &plan, git);
+        return mv_dry_run(&root, json, &plan, git, hidden);
     }
-    // Line numbers use spans against the *original* contents, so the JSON
-    // payload is assembled before the rewrites hit the disk.
+    // Line numbers use spans against the *original* contents.
     let changed = if json {
         flow(json, "mv", output::changed_files(&root, &plan))?
     } else {
@@ -160,27 +160,31 @@ fn mv(
     let applied = flow(json, "mv", apply::apply(&root, &plan, git))?;
 
     if json {
-        json::print(&Envelope::ok(
-            "mv",
-            MvData::new(&plan, changed, applied.via_git),
-        ));
+        let data = MvData::new(&plan, changed, applied.via_git, hidden);
+        json::print(&Envelope::ok("mv", data));
     } else {
         println!("{}", output::mv_summary(&plan, applied.via_git));
+        output::report_refs(&hidden);
     }
     Ok(exit::OK)
 }
 
 /// Dry-run branch: unified diff for humans, structured preview for agents.
-fn mv_dry_run(root: &Path, json: bool, plan: &MovePlan, git: apply::GitMode) -> Flow<i32> {
+fn mv_dry_run(
+    root: &Path,
+    json: bool,
+    plan: &MovePlan,
+    git: apply::GitMode,
+    hidden: Vec<refs::NonImportRef>,
+) -> Flow<i32> {
     let diff = flow(json, "mv", apply::render_diff(root, plan))?;
     let via_git = apply::would_use_git(root, &plan.source, git);
     if json {
-        json::print(&Envelope::dry_run(
-            "mv",
-            MvDryRunData::new(plan, diff, via_git),
-        ));
+        let data = MvDryRunData::new(plan, diff, via_git, hidden);
+        json::print(&Envelope::dry_run("mv", data));
     } else {
         print!("{diff}");
+        output::report_refs(&hidden);
     }
     Ok(exit::OK)
 }
@@ -192,7 +196,7 @@ fn mv_dry_run(root: &Path, json: bool, plan: &MovePlan, git: apply::GitMode) -> 
 /// command itself succeeded; agents read `total` or the exit code).
 fn check(root: &Path, source_root: Option<&Path>, json: bool) -> Flow<i32> {
     let root = flow(json, "check", root.canonicalize().map_err(JmoveError::from))?;
-    let source_root = flow(json, "check", normalize_scope(&root, source_root))?;
+    let source_root = flow(json, "check", Index::normalize_scope(&root, source_root))?;
     let scope = source_root.as_deref();
     let index = flow(json, "check", Index::build_scoped(&root, scope))?;
     let broken = flow(json, "check", output::broken_imports(&root, &index))?;
@@ -215,21 +219,6 @@ fn check(root: &Path, source_root: Option<&Path>, json: bool) -> Flow<i32> {
         output::report_check(&broken, &mismatches);
     }
     Ok(code)
-}
-
-/// Validate the global `--source-root`: project-relative, existing dir.
-fn normalize_scope(root: &Path, scope: Option<&Path>) -> JmoveResult<Option<PathBuf>> {
-    let Some(scope) = scope else {
-        return Ok(None);
-    };
-    let rel = core::rel_from_root(root, scope)?;
-    if !root.join(&rel).is_dir() {
-        return Err(JmoveError::InvalidArgument(format!(
-            "--source-root '{}' is not a directory",
-            core::rel_str(&rel)
-        )));
-    }
-    Ok(Some(rel))
 }
 
 /// Unwrap a core result, routing failures through the CLI error channel.

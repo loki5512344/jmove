@@ -79,7 +79,7 @@ pub fn fix(
     json: bool,
 ) -> Flow<i32> {
     let root = flow(json, "fix", root.canonicalize().map_err(JmoveError::from))?;
-    let source_root = flow(json, "fix", super::normalize_scope(&root, source_root))?;
+    let source_root = flow(json, "fix", Index::normalize_scope(&root, source_root))?;
     if let Some(rejected) = fix_reject(rule) {
         return Err(fail(json, "fix", rejected));
     }

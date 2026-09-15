@@ -1,0 +1,1 @@
+stale ref: ./lib/sum

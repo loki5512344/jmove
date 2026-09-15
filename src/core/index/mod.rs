@@ -19,7 +19,7 @@ use std::path::{Path, PathBuf};
 
 use ignore::WalkBuilder;
 
-use crate::core::{JmoveResult, normalize_rel_path};
+use crate::core::{JmoveError, JmoveResult, normalize_rel_path};
 use crate::parser::java::JavaClassIndex;
 use crate::parser::resolve::resolve_module;
 use crate::parser::{ImportRecord, Language, PackageDecl, SourceLanguage, frontend_for};
@@ -53,6 +53,25 @@ pub struct Index {
     pub java_classes: JavaClassIndex,
     /// tsconfig `compilerOptions.paths` alias table (empty without one).
     pub aliases: PathAliases,
+}
+
+/// Validate the global `--source-root`: project-relative, existing dir.
+/// Kept next to [`Index::build_scoped`], its only consumer.
+impl Index {
+    /// Resolve `--source-root` against the project root.
+    pub fn normalize_scope(root: &Path, scope: Option<&Path>) -> JmoveResult<Option<PathBuf>> {
+        let Some(scope) = scope else {
+            return Ok(None);
+        };
+        let rel = crate::core::rel_from_root(root, scope)?;
+        if !root.join(&rel).is_dir() {
+            return Err(JmoveError::InvalidArgument(format!(
+                "--source-root '{}' is not a directory",
+                crate::core::rel_str(&rel)
+            )));
+        }
+        Ok(Some(rel))
+    }
 }
 
 impl Index {

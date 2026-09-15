@@ -10,6 +10,7 @@ pub mod apply;
 pub mod fix;
 pub mod index;
 pub mod plan;
+pub mod refs;
 
 use std::ffi::OsStr;
 use std::io;
@@ -121,6 +122,17 @@ pub fn rel_str(path: &Path) -> String {
         .map(|c| c.as_os_str().to_string_lossy())
         .collect::<Vec<_>>()
         .join("/")
+}
+
+/// 1-based line containing the byte offset `byte` in `source`.
+#[must_use]
+pub fn line_of(source: &str, byte: usize) -> usize {
+    let upto = source.len().min(byte);
+    source.as_bytes()[..upto]
+        .iter()
+        .filter(|b| **b == b'\n')
+        .count()
+        + 1
 }
 
 /// Convert a user-supplied path to a normalized project-relative path.

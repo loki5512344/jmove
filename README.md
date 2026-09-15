@@ -60,6 +60,9 @@ jmove mv src/foo.ts src/bar/foo.ts --no-git
 # Move a whole directory: every file relocates, every importer follows
 jmove mv src/utils src/helpers
 
+# Moves also warn (never edit) about references the import graph cannot
+# see: markdown links, package.json fields, jest.mock strings
+
 # Java: jmove updates `package`, all `import`s and moves the file
 jmove mv src/com/example/utils/Parser.java src/com/example/core/Parser.java
 
