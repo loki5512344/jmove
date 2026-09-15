@@ -18,8 +18,10 @@ use crate::core::{JmoveResult, rel_str};
 pub fn render_diff(root: &Path, plan: &MovePlan) -> JmoveResult<String> {
     let mut out = render_edits_diff(root, &group_by_file(plan))?;
     if !out.is_empty() {
-        let (src, dst) = (rel_str(&plan.source), rel_str(&plan.target));
-        out.push_str(&format!("move {src} -> {dst}\n"));
+        for m in &plan.moves {
+            let (src, dst) = (rel_str(&m.source), rel_str(&m.target));
+            out.push_str(&format!("move {src} -> {dst}\n"));
+        }
     }
     Ok(out)
 }
@@ -47,7 +49,7 @@ pub fn render_edits_diff(
 mod tests {
     use super::render_diff;
     use crate::core::JmoveResult;
-    use crate::core::plan::{MovePlan, Rewrite};
+    use crate::core::plan::{FileMove, MovePlan, Rewrite};
     use std::path::Path;
 
     const OLD: &str = "import {\n  fmt,\n} from '../lib/fmt';\n";
@@ -56,12 +58,25 @@ mod tests {
         MovePlan {
             source: "lib/fmt.ts".into(),
             target: "deep/fmt.ts".into(),
+            moves: vec![
+                FileMove {
+                    source: "lib/fmt.ts".into(),
+                    target: "deep/fmt.ts".into(),
+                },
+                // A second move proves the dir flavour renders one line each.
+                FileMove {
+                    source: "lib/gfx.ts".into(),
+                    target: "deep/gfx.ts".into(),
+                },
+            ],
             rewrites: vec![Rewrite {
                 file: "src/app.ts".into(),
                 span: 24..34,
                 old_text: "../lib/fmt".into(),
                 new_text: "../deep/fmt".into(),
             }],
+            left_behind: Vec::new(),
+            prune_dirs: Vec::new(),
         }
     }
 
@@ -74,7 +89,10 @@ mod tests {
         assert!(diff.contains("--- src/app.ts") && diff.contains("+++ src/app.ts"));
         assert!(diff.contains("@@"));
         assert!(diff.contains("-} from '../lib/fmt';") && diff.contains("+} from '../deep/fmt';"));
-        assert!(diff.ends_with("move lib/fmt.ts -> deep/fmt.ts\n"));
+        assert!(
+            diff.ends_with("move lib/fmt.ts -> deep/fmt.ts\nmove lib/gfx.ts -> deep/gfx.ts\n"),
+            "{diff}"
+        );
         let mut empty = plan();
         empty.rewrites.clear();
         assert_eq!(render_diff(dir.path(), &empty)?, "");

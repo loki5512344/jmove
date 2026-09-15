@@ -2,12 +2,14 @@
 //!
 //! A plan is pure data (no disk writes), so dry-run and `--json` can render
 //! it without touching the filesystem. Specifier arithmetic lives in
-//! [`specifier`]; the Java package/directory flavour in [`java`].
+//! [`specifier`]; the Java package/directory flavour in [`java`], and the
+//! mirrored batch move of a whole directory in [`dir`].
 
+mod dir;
 mod java;
-mod specifier;
 #[cfg(test)]
-pub(crate) mod tests_support;
+pub(crate) use dir::tests_support;
+mod specifier;
 
 pub use specifier::relative_specifier;
 
@@ -42,24 +44,44 @@ impl From<&Rewrite> for Edit {
     }
 }
 
-/// Complete plan for moving `source` to `target`.
+/// One physical file relocation inside a plan.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct MovePlan {
-    /// Project-relative path being moved.
+pub struct FileMove {
+    /// Project-relative file being moved.
     pub source: PathBuf,
     /// Project-relative destination path.
     pub target: PathBuf,
-    /// Specifier rewrites, sorted by (file, span).
-    pub rewrites: Vec<Rewrite>,
 }
 
-/// Compute the rewrite plan for `source -> target`.
+/// Complete plan for moving `source` to `target`: a file move produces one
+/// [`FileMove`], a directory move one per indexed member (see [`dir`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MovePlan {
+    /// Requested source: the file, or the directory whose members move.
+    pub source: PathBuf,
+    /// Requested destination.
+    pub target: PathBuf,
+    /// Every physical relocation, in sorted source order.
+    pub moves: Vec<FileMove>,
+    /// Specifier/package rewrites, merged across moves, sorted by (file, span).
+    pub rewrites: Vec<Rewrite>,
+    /// Directory moves only: real files under `source` that no plan step
+    /// moves (unindexable assets) — reported, never silently relocated.
+    pub left_behind: Vec<PathBuf>,
+    /// Directory moves only: source directories to prune (deepest first)
+    /// once every move landed. Removal only succeeds when a directory is
+    /// empty, so `left_behind` files keep their home in place — exactly right.
+    pub prune_dirs: Vec<PathBuf>,
+}
+
+/// Compute the rewrite plan for `source -> target`; a `source` that is a
+/// directory on disk becomes a mirrored move of all indexed members below it.
 ///
-/// TS/JS: every indexed import whose resolved target equals `source` gets a
-/// new relative specifier from the importer's directory to `target` (see
-/// [`relative_specifier`]). Java moves additionally rewrite the moved file's
-/// `package` declaration (see [`java`]). Rewrites whose result equals the
-/// old specifier are dropped; the result is sorted by (file, span).
+/// TS/JS: every indexed import whose resolved target equals a moved file gets
+/// a new relative specifier from the importer's directory to its destination
+/// (see [`relative_specifier`]). Java moves additionally rewrite the moved
+/// file's `package` declaration (see [`java`]). Rewrites whose result equals
+/// the old specifier are dropped; the result is sorted by (file, span).
 pub fn plan_move(index: &Index, source: &Path, target: &Path) -> JmoveResult<MovePlan> {
     let rel = |label: &str, p: &Path| match normalize_rel_path(p) {
         Some(r) => Ok(r),
@@ -69,16 +91,20 @@ pub fn plan_move(index: &Index, source: &Path, target: &Path) -> JmoveResult<Mov
         ))),
     };
     let (source, target) = (rel("source path", source)?, rel("target path", target)?);
+    if source == target {
+        return Err(JmoveError::PlanRejected(
+            "source and target are the same".into(),
+        ));
+    }
+    // A directory on disk turns the command into a mirrored batch move.
+    if index.root.join(&source).is_dir() {
+        return dir::plan_dir(index, &source, &target);
+    }
     if !index.files.contains(&source) {
         let s = rel_str(&source);
         return Err(JmoveError::InvalidArgument(format!(
             "source '{s}' is not an indexed file"
         )));
-    }
-    if source == target {
-        return Err(JmoveError::PlanRejected(
-            "source and target are the same".into(),
-        ));
     }
     if index.files.contains(&target) {
         let t = rel_str(&target);
@@ -86,17 +112,31 @@ pub fn plan_move(index: &Index, source: &Path, target: &Path) -> JmoveResult<Mov
             "target '{t}' already exists"
         )));
     }
-
-    let rewrites = if SourceLanguage::for_path(&source) == Some(SourceLanguage::Java) {
-        java::java_rewrites(index, &source, &target)?
-    } else {
-        ts_rewrites(index, &source, &target)
-    };
+    let rewrites = file_rewrites(index, &source, &target)?;
     Ok(MovePlan {
-        source,
-        target,
+        source: source.clone(),
+        target: target.clone(),
+        moves: vec![FileMove { source, target }],
         rewrites,
+        left_behind: Vec::new(),
+        prune_dirs: Vec::new(),
     })
+}
+
+/// The per-file rewrite set: Java moves rewrite the `package` declaration
+/// too; shared by single-file and directory planning.
+pub(super) fn file_rewrites(
+    index: &Index,
+    source: &Path,
+    target: &Path,
+) -> JmoveResult<Vec<Rewrite>> {
+    Ok(
+        if SourceLanguage::for_path(source) == Some(SourceLanguage::Java) {
+            java::java_rewrites(index, source, target)?
+        } else {
+            ts_rewrites(index, source, target)
+        },
+    )
 }
 
 // Relative-specifier rewrites for the TS/JS flavour of the graph.
@@ -126,10 +166,10 @@ fn ts_rewrites(index: &Index, source: &Path, target: &Path) -> Vec<Rewrite> {
 
 #[cfg(test)]
 mod tests {
+    use super::tests_support::edge;
     use super::{Rewrite, plan_move};
     use crate::core::JmoveError;
     use crate::core::index::{Index, ResolvedImport};
-    use crate::core::plan::tests_support::edge;
     use std::path::{Path, PathBuf};
 
     fn index_with(files: &[&str], imports: &[(&str, Vec<ResolvedImport>)]) -> Index {
@@ -170,6 +210,7 @@ mod tests {
                 new_text: "./sub/deep/s".into(),
             }
         );
+        assert_eq!(plan.moves.len(), 1);
     }
 
     #[test]

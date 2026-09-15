@@ -91,7 +91,7 @@ AI оставляем СНАРУЖИ: при неоднозначности jmov
 - [ ] Поддержка tsconfig paths / алиасов (@/...)
 - [ ] Параллельная индексация через rayon
 - [x] --git интеграция (git mv для stage/истории): auto для tracked файлов, --no-git флаг, moved_via/would_move_via в --json
-- [ ] Перенос директорий целиком (mv папки)
+- [x] Перенос директорий целиком (mv папки): зеркальный batch-move всех индексируемых файлов, merged rewrites, prune пустых исходных каталогов, left_behind для неиндексируемых
 - [ ] Предупреждения о не-import ссылках: package.json exports, jest mocks, tsconfig includes, markdown links
 - [ ] prettier интеграция после rewrite (по желанию)
 

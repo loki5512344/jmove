@@ -2,8 +2,8 @@
 
 ## What this tool does
 
-Moves or renames source files inside a project and updates every import
-statement referencing them. Never breaks imports. Supported: TypeScript,
+Moves or renames source files — or whole directories of them — inside a
+project and updates every import statement referencing them. Never breaks imports. Supported: TypeScript,
 JavaScript, Java (package declaration + all importers + the file move are
 kept in sync); Python/Go on the roadmap. Single binary, no LSP needed.
 
@@ -24,6 +24,13 @@ jmove mv <source> <target> [--root DIR] [--source-root DIR] [--dry-run] [--json]
 Always run `--dry-run` first and confirm the change set looks right.
 Moving onto an existing path fails with `TARGET_EXISTS` — choose another
 target (Phase 1 has no overwrite mode).
+
+Directory moves: `mv <dir> <target>` relocates every indexed file under
+`<dir>` mirrored under `<target>` in one atomic batch. `--json` adds
+`moved_files[]` (from/to per file) and `left_behind[]` — real files under
+`<dir>` that are not indexable and deliberately stay where they are.
+Emptied source directories are pruned; a directory with leftovers is not.
+A source that is nested in its own target fails with `PLAN_REJECTED`.
 
 Git integration: inside a git repository, a tracked file is renamed with
 `git mv` so the rename is staged (history-preserving `git log --follow` /

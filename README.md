@@ -57,6 +57,9 @@ jmove mv src/utils/parser.ts src/core/parser.ts
 # --no-git forces a plain rename
 jmove mv src/foo.ts src/bar/foo.ts --no-git
 
+# Move a whole directory: every file relocates, every importer follows
+jmove mv src/utils src/helpers
+
 # Java: jmove updates `package`, all `import`s and moves the file
 jmove mv src/com/example/utils/Parser.java src/com/example/core/Parser.java
 

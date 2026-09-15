@@ -5,8 +5,8 @@ consuming `--json`. All outputs below are captured from the real binary.
 
 Flags (see `jmove --help`): `mv <source> <target> [--dry-run] [--json]
 [--no-git]`, `check [--json]`, and the global `--root <DIR>` /
-`--source-root <DIR>` (index one subtree only — the monorepo disambiguator
-for duplicate Java packages). `.gitignore`d files are never indexed. Inside a git repo, `mv` of a tracked file uses `git mv` (the
+`--source-root <DIR>` (monorepo subtree filter). `<source>` may also be a
+directory (mirrored batch move, emptied dirs pruned). Inside a git repo, `mv` of a tracked file uses `git mv` (the
 rename is staged); `--no-git` forces a plain filesystem rename.
 Exit codes: `0` ok · `1` operation error · `2` `check` found broken imports.
 

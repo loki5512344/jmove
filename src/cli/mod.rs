@@ -17,7 +17,7 @@ use crate::core::index::Index;
 use crate::core::plan::{self, MovePlan};
 use crate::core::{self, JmoveError, JmoveResult};
 
-use json::{CheckData, Envelope, ErrorData, MvData, MvDryRunData};
+use json::{Envelope, ErrorData, MvData, MvDryRunData};
 
 /// jmove — move source files, keep every import intact.
 #[derive(Debug, Parser)]
@@ -204,7 +204,7 @@ fn check(root: &Path, source_root: Option<&Path>, json: bool) -> Flow<i32> {
 
     if json {
         let total = broken.len();
-        let data = CheckData {
+        let data = output::CheckData {
             broken_imports: broken,
             total,
         };

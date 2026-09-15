@@ -113,3 +113,21 @@ fn mv_no_git_keeps_the_plain_rename_unstaged() {
     let target = git_output(tmp.path(), &["status", "--porcelain", "--", "utils/sum.ts"]);
     assert!(target.starts_with("??"), "{target}");
 }
+
+#[test]
+fn dir_move_stages_every_rename_and_prunes_the_source_dir() {
+    let tmp = git_fixture("basic");
+    jmove(&tmp, &["mv", "lib", "vendor/lib"])
+        .success()
+        .stdout(predicate::str::contains("(via git mv)"));
+    let staged = git_output(tmp.path(), &["diff", "--cached", "-M", "--name-status"]);
+    assert!(
+        staged.contains("vendor/lib/sum.ts") && staged.contains("lib/sum.ts"),
+        "{staged}"
+    );
+    assert!(tmp.path().join("vendor/lib/sum.ts").is_file());
+    assert!(
+        !tmp.path().join("lib").exists(),
+        "emptied source dir pruned"
+    );
+}

@@ -136,12 +136,45 @@ pub struct MvData {
     pub target: String,
     /// Importer files touched by the move.
     pub changed_files: Vec<ChangedFile>,
-    /// Number of files moved (always 1 in Phase 1).
+    /// Number of files physically moved (1 for a file move, N for a dir).
     pub moved: usize,
     /// Total specifiers rewritten across all importers.
     pub updated_imports: usize,
-    /// Rename backend: `"git"` (staged in the index) or `"fs"`.
+    /// Rename backend: `"git"` (every rename staged in the index) or `"fs"`.
     pub moved_via: &'static str,
+    /// Directory moves only: each `(from, to)` relocation (omitted for file moves).
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub moved_files: Vec<FileMoveData>,
+    /// Directory moves only: unindexable files staying in place (omitted when empty).
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub left_behind: Vec<String>,
+}
+
+/// One `(from, to)` relocation of a directory move.
+#[derive(Debug, Serialize)]
+pub struct FileMoveData {
+    /// Project-relative path moved away.
+    pub from: String,
+    /// Project-relative destination path.
+    pub to: String,
+}
+
+impl FileMoveData {
+    fn from(m: &crate::core::plan::FileMove) -> Self {
+        Self {
+            from: rel_str(&m.source),
+            to: rel_str(&m.target),
+        }
+    }
+}
+
+// Relocation list, present only when the plan moved more than one file.
+fn dir_moves(plan: &MovePlan) -> Vec<FileMoveData> {
+    if plan.moves.len() > 1 {
+        plan.moves.iter().map(FileMoveData::from).collect()
+    } else {
+        Vec::new()
+    }
 }
 
 impl MvData {
@@ -152,9 +185,12 @@ impl MvData {
             source: rel_str(&plan.source),
             target: rel_str(&plan.target),
             changed_files,
-            moved: 1,
+            moved: plan.moves.len(),
             updated_imports: plan.rewrites.len(),
             moved_via: if via_git { "git" } else { "fs" },
+            // A single-file move keeps the old contract: no extra fields.
+            moved_files: dir_moves(plan),
+            left_behind: plan.left_behind.iter().map(|p| rel_str(p)).collect(),
         }
     }
 }
@@ -175,6 +211,9 @@ pub struct MvDryRunData {
     pub diff: String,
     /// Rename backend a real run would use: `"git"` or `"fs"`.
     pub would_move_via: &'static str,
+    /// Directory moves only: every relocation that would happen.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub would_move_files: Vec<FileMoveData>,
 }
 
 impl MvDryRunData {
@@ -191,30 +230,9 @@ impl MvDryRunData {
                 .collect(),
             diff,
             would_move_via: if via_git { "git" } else { "fs" },
+            would_move_files: dir_moves(plan),
         }
     }
-}
-
-/// One unresolvable relative import found by `check`.
-#[derive(Debug, Serialize)]
-pub struct BrokenImport {
-    /// Project-relative file declaring the import.
-    pub file: String,
-    /// 1-based line of the specifier.
-    pub line: usize,
-    /// Specifier text as written.
-    pub import: String,
-    /// Stable reason code, currently always `"file_not_found"`.
-    pub reason: &'static str,
-}
-
-/// Success payload of `check --json` (flattened under the envelope).
-#[derive(Debug, Serialize)]
-pub struct CheckData {
-    /// Broken imports, sorted by file then line.
-    pub broken_imports: Vec<BrokenImport>,
-    /// Number of broken imports (kept as an explicit counter for agents).
-    pub total: usize,
 }
 
 /// Serialize `value` as pretty JSON to stdout.

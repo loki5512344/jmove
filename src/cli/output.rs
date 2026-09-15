@@ -4,6 +4,8 @@
 //! Pure functions returning data, except [`report_check`] and
 //! [`print_error`] which perform the only I/O (stdout and stderr).
 
+use serde::Serialize;
+
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
@@ -11,7 +13,7 @@ use crate::core::index::Index;
 use crate::core::plan::{MovePlan, Rewrite};
 use crate::core::{JmoveResult, rel_str};
 
-use super::json::{BrokenImport, Change, ChangedFile, ErrorData};
+use super::json::{Change, ChangedFile, ErrorData};
 
 /// `check` stdout line when the project has no broken imports.
 const CHECK_CLEAN: &str = "check: no broken imports found";
@@ -107,7 +109,8 @@ pub fn mv_reject(root: &Path, source: &Path, target: &Path) -> Option<ErrorData>
         let msg = "source and target are the same path".into();
         return bad("INVALID_ARGUMENT", msg, "pick a different destination");
     }
-    if !root.join(source).is_file() {
+    let src_path = root.join(source);
+    if !src_path.is_file() && !src_path.is_dir() {
         let msg = format!("source file '{}' does not exist", rel_str(source));
         return bad(
             "SOURCE_NOT_FOUND",
@@ -137,14 +140,23 @@ pub fn mv_reject(root: &Path, source: &Path, target: &Path) -> Option<ErrorData>
 }
 
 /// `moved src -> tgt, updated N imports in M files` success summary,
-/// noting when the rename went through `git mv`.
+/// noting the `git mv` backend and, for directory moves, the file count
+/// and anything unindexable that stays behind.
 #[must_use]
 pub fn mv_summary(plan: &MovePlan, via_git: bool) -> String {
     let imports = plan.rewrites.len();
     let files = group_by_file(&plan.rewrites).len();
     let git = if via_git { " (via git mv)" } else { "" };
+    let batch = match plan.moves.len() {
+        1 => String::new(),
+        n => format!(" ({n} files)"),
+    };
+    let left = match plan.left_behind.len() {
+        0 => String::new(),
+        n => format!(", {} unsupported {} left behind", n, plural(n, "file")),
+    };
     format!(
-        "moved {} -> {}{git}, updated {} {} in {} {}",
+        "moved {} -> {}{batch}{git}, updated {} {} in {} {}{left}",
         rel_str(&plan.source),
         rel_str(&plan.target),
         imports,
@@ -185,4 +197,26 @@ pub(crate) fn plural(count: usize, noun: &str) -> String {
     } else {
         format!("{noun}s")
     }
+}
+
+/// One unresolvable relative import found by `check`.
+#[derive(Debug, Serialize)]
+pub struct BrokenImport {
+    /// Project-relative file declaring the import.
+    pub file: String,
+    /// 1-based line of the specifier.
+    pub line: usize,
+    /// Specifier text as written.
+    pub import: String,
+    /// Stable reason code, currently always `"file_not_found"`.
+    pub reason: &'static str,
+}
+
+/// Success payload of `check --json` (flattened under the envelope).
+#[derive(Debug, Serialize)]
+pub struct CheckData {
+    /// Broken imports, sorted by file then line.
+    pub broken_imports: Vec<BrokenImport>,
+    /// Number of broken imports (kept as an explicit counter for agents).
+    pub total: usize,
 }

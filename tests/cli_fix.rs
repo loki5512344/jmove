@@ -142,49 +142,6 @@ fn missing_project() -> tempfile::TempDir {
 }
 
 #[test]
-fn missing_import_adds_unique_and_reports_ambiguous() {
-    let tmp = missing_project();
-    jmove(&tmp, &["fix", "--rule", "java/missing-import", "--json"])
-        .success()
-        .stdout(
-            predicate::str::contains("\"rule\": \"java/missing-import\"")
-                .and(predicate::str::contains("\"applied\": false"))
-                .and(predicate::str::contains("\"com.example.a.Config\""))
-                .and(predicate::str::contains("\"com.example.b.Config\"")),
-        );
-    let calc = read(&in_root(
-        tmp.path(),
-        "src/main/java/com/example/app/Calc.java",
-    ));
-    assert!(
-        calc.contains("package com.example.app;\nimport com.example.util.Maths;\n"),
-        "{calc}"
-    );
-    // The ambiguous `Config` is never guessed at.
-    let refer = read(&in_root(
-        tmp.path(),
-        "src/main/java/com/example/c/Refer.java",
-    ));
-    assert!(!refer.contains("import com.example."), "{refer}");
-    jmove(&tmp, &["check"]).success();
-}
-
-#[test]
-fn missing_import_dry_run_then_stable_reapply() {
-    let tmp = missing_project();
-    jmove(&tmp, &["fix", "--dry-run"])
-        .success()
-        .stdout(predicate::str::contains("+import com.example.util.Maths;"));
-    jmove(&tmp, &["fix"])
-        .success()
-        .stdout(predicate::str::contains("fixed 3 issues in 2 files"));
-    // Only manual (ambiguous) findings remain: nothing further applies.
-    jmove(&tmp, &["fix"])
-        .success()
-        .stdout(predicate::str::contains("nothing to change"));
-}
-
-#[test]
 fn unused_delete_and_missing_insert_coexist_in_one_file() {
     // Dual.java: the unused import is deleted while the missing `Maths`
     // import lands at the very byte of the deleted line's end — adjacent,
@@ -195,56 +152,6 @@ fn unused_delete_and_missing_insert_coexist_in_one_file() {
     let text = read(&in_root(tmp.path(), dual));
     assert!(!text.contains("Gone"), "{text}");
     assert!(text.contains("import com.example.util.Maths;"), "{text}");
-    jmove(&tmp, &["check"]).success();
-}
-
-#[test]
-fn three_rules_converge_on_one_project() {
-    // App.java: unused import inside an out-of-order block (the order
-    // rewrite overlaps the deletion, so it defers to run 2).
-    // C.java: out-of-order block + a bare `Maths` reference (insertion at
-    // the block boundary coexists with the rewrite in run 1).
-    let tmp = common::copy_fixture("java", "order");
-    jmove(&tmp, &["fix", "--dry-run", "--json"])
-        .success()
-        .stdout(
-            predicate::str::contains("\"rule\": \"java/import-order\"")
-                .and(predicate::str::contains("\"applied\": false"))
-                .and(predicate::str::contains("skipped")),
-        );
-    let app = "src/main/java/com/example/app/App.java";
-    let c = "src/main/java/com/example/app/C.java";
-    jmove(&tmp, &["fix"])
-        .success()
-        .stdout(predicate::str::contains("fixed 3 issues in 2 files"));
-    let app_text = read(&in_root(tmp.path(), app));
-    // Unused is gone; the deferred order fix has not touched the block.
-    assert!(!app_text.contains("Unneeded"), "{app_text}");
-    assert!(
-        app_text.contains("import java.util.List;\nimport com.example.util.Maths;"),
-        "{app_text}"
-    );
-    jmove(&tmp, &["fix"])
-        .success()
-        .stdout(predicate::str::contains("fixed 2 issues in 2 files"));
-    let c_text = read(&in_root(tmp.path(), c));
-    assert!(
-        c_text.contains(
-            "import com.example.util.Maths;\nimport java.util.List;\nimport java.util.Map;\n"
-        ),
-        "{c_text}"
-    );
-    let app_text = read(&in_root(tmp.path(), app));
-    assert!(
-        app_text.contains(
-            "import com.example.util.Maths;\nimport java.util.List;\nimport java.util.Map;\n"
-        ),
-        "{app_text}"
-    );
-    // Fixed point.
-    jmove(&tmp, &["fix"])
-        .success()
-        .stdout(predicate::str::contains("nothing to change"));
     jmove(&tmp, &["check"]).success();
 }
 

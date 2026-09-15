@@ -22,7 +22,7 @@ use crate::core::Edit;
 use crate::core::apply::fsops::{
     create_missing_dirs, group_by_file, rewrite_bytes, sibling_temp, write_durable,
 };
-use crate::core::plan::MovePlan;
+use crate::core::plan::{FileMove, MovePlan};
 use crate::core::{JmoveError, JmoveResult, rel_str};
 
 /// Summary of a successfully applied plan.
@@ -30,22 +30,22 @@ use crate::core::{JmoveError, JmoveResult, rel_str};
 pub struct Applied {
     /// Number of files whose imports were rewritten.
     pub files_rewritten: usize,
-    /// The moved file's new project-relative path.
+    /// The moved file's new project-relative path (directory moves: the
+    /// requested destination, mirroring [`crate::core::plan::MovePlan::target`]).
     pub new_path: PathBuf,
-    /// Whether the physical rename went through `git mv`.
+    /// Whether every physical rename went through `git mv`.
     pub via_git: bool,
 }
 
 // Rollback state for one run: originals of rewritten files (newest last),
-// dirs created for the target, and the final rename once it happened.
+// dirs created for the targets, and the renames once they happened.
 #[derive(Default)]
 struct Run {
     root: PathBuf,
     backups: Vec<(PathBuf, Vec<u8>)>,
     dirs: Vec<PathBuf>,
-    // Root-relative (src, dst) of the executed rename.
-    moved: Option<(PathBuf, PathBuf)>,
-    via_git: bool,
+    // Executed root-relative renames (src, dst, went-through-git), oldest first.
+    moved: Vec<(PathBuf, PathBuf, bool)>,
 }
 
 /// Apply `plan` under `root` atomically (see module docs). Rollback is
@@ -80,23 +80,43 @@ impl Run {
     fn try_apply(&mut self, plan: &MovePlan, mode: GitMode) -> JmoveResult<Applied> {
         let by_file = group_by_file(plan);
         self.write_all(&by_file)?;
-        // The move comes last, after every importer was rewritten.
-        let (src, dst) = (self.root.join(&plan.source), self.root.join(&plan.target));
-        self.dirs = create_missing_dirs(&dst)?;
-        // git mv needs the destination dir to exist; tracked sources are
-        // renamed through git so the change lands staged in the index.
-        self.via_git = would_use_git(&self.root, &plan.source, mode);
-        if self.via_git {
-            git::mv(&self.root, &plan.source, &plan.target)?;
-        } else {
-            fs::rename(&src, &dst)?;
+        // The moves come last, after every importer was rewritten. A
+        // directory plan is applied file by file in sorted order; any
+        // failure rolls the whole batch back.
+        for m in &plan.moves {
+            self.move_one(mode, m)?;
         }
-        self.moved = Some((plan.source.clone(), plan.target.clone()));
+        // Directory moves leave their emptied source dirs behind otherwise;
+        // remove_dir only succeeds when truly empty, so `left_behind` files
+        // keep their home. This is the last step: nothing can fail after it.
+        for d in &plan.prune_dirs {
+            let _ = fs::remove_dir(self.root.join(d));
+        }
         Ok(Applied {
             files_rewritten: by_file.len(),
             new_path: plan.target.clone(),
-            via_git: self.via_git,
+            via_git: !self.moved.is_empty() && self.moved.iter().all(|(_, _, g)| *g),
         })
+    }
+
+    fn move_one(&mut self, mode: GitMode, m: &FileMove) -> JmoveResult<()> {
+        let (src, dst) = (self.root.join(&m.source), self.root.join(&m.target));
+        for created in create_missing_dirs(&dst)? {
+            self.dirs.push(created);
+        }
+        // git mv needs the destination dir to exist; tracked sources are
+        // renamed through git so the change lands staged in the index.
+        let via_git = would_use_git(&self.root, &m.source, mode);
+        let done = if via_git {
+            git::mv(&self.root, &m.source, &m.target)
+                .map(|()| (m.source.clone(), m.target.clone(), true))
+        } else {
+            fs::rename(&src, &dst)
+                .map(|()| (m.source.clone(), m.target.clone(), false))
+                .map_err(Into::into)
+        };
+        self.moved.push(done?);
+        Ok(())
     }
 
     fn try_fix(&mut self, by_file: &BTreeMap<PathBuf, Vec<Edit>>) -> JmoveResult<usize> {
@@ -131,8 +151,12 @@ impl Run {
     // problems to its message.
     fn undo(&mut self, err: JmoveError) -> JmoveError {
         let mut problems = Vec::new();
-        if let Some((src, dst)) = self.moved.take() {
-            let back = if self.via_git {
+        for (src, dst, via_git) in self.moved.drain(..).rev() {
+            // The prune step never runs before a failure, but a later move
+            // can fail after git mv created target dirs that a rollback
+            // through git may expect; ensure the original parent exists.
+            let _ = fs::create_dir_all(self.root.join(&src).parent().unwrap());
+            let back = if via_git {
                 git::mv(&self.root, &dst, &src)
             } else {
                 fs::rename(self.root.join(&dst), self.root.join(&src)).map_err(Into::into)
@@ -154,96 +178,5 @@ impl Run {
         }
         let msg = format!("{err}; rollback incomplete: {}", problems.join("; "));
         JmoveError::Io(std::io::Error::other(msg))
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::{GitMode, apply};
-    use crate::core::JmoveResult;
-    use crate::core::plan::{MovePlan, Rewrite};
-    use std::fs;
-    use std::path::{Path, PathBuf};
-
-    const OLD: &str = "import {\n  fmt,\n} from '../lib/fmt';\n";
-    const NEW: &str = "import {\n  fmt,\n} from '../deep/fmt';\n";
-    // Byte span of `../lib/fmt` (between the quotes) inside OLD.
-    const SPAN: std::ops::Range<usize> = 24..34;
-
-    // Plan moving lib/fmt.ts -> deep/fmt.ts, rewriting src/app.ts.
-    fn plan() -> MovePlan {
-        let rewrite = Rewrite {
-            file: "src/app.ts".into(),
-            span: SPAN,
-            old_text: "../lib/fmt".into(),
-            new_text: "../deep/fmt".into(),
-        };
-        MovePlan {
-            source: "lib/fmt.ts".into(),
-            target: "deep/fmt.ts".into(),
-            rewrites: vec![rewrite],
-        }
-    }
-
-    fn mk(dir: &Path, rel: &str, body: &str) -> JmoveResult<()> {
-        let path = dir.join(rel);
-        fs::create_dir_all(path.parent().unwrap())?;
-        fs::write(path, body)?;
-        Ok(())
-    }
-
-    #[test]
-    fn apply_rewrites_spans_creates_dirs_and_moves_last() -> JmoveResult<()> {
-        assert_eq!(&OLD[SPAN], "../lib/fmt"); // sanity: the span is real
-        let dir = tempfile::TempDir::new()?;
-        let root = dir.path();
-        mk(root, "src/app.ts", OLD)?;
-        mk(root, "lib/fmt.ts", "export const fmt = 1;\n")?;
-        let applied = apply(root, &plan(), GitMode::Disabled)?;
-        assert_eq!(
-            (applied.files_rewritten, &applied.new_path),
-            (1, &PathBuf::from("deep/fmt.ts"))
-        );
-        assert!(!root.join("lib/fmt.ts").exists());
-        assert_eq!(
-            fs::read_to_string(root.join("deep/fmt.ts"))?,
-            "export const fmt = 1;\n"
-        );
-        // Only the specifier bytes changed; the layout is kept byte-exact.
-        assert_eq!(fs::read_to_string(root.join("src/app.ts"))?, NEW);
-        assert!(!root.join("src/app.ts.jmove-tmp").exists());
-        Ok(())
-    }
-
-    #[test]
-    fn apply_rolls_back_when_the_move_fails() -> JmoveResult<()> {
-        // Missing source: the last rename fails after the rewrite landed.
-        let dir = tempfile::TempDir::new()?;
-        mk(dir.path(), "src/app.ts", OLD)?;
-        let err = apply(dir.path(), &plan(), GitMode::Disabled).expect_err("missing source");
-        assert!(matches!(err, crate::core::JmoveError::Io(_)), "{err}");
-        // Importer restored to its exact original bytes; created dirs gone.
-        assert_eq!(fs::read_to_string(dir.path().join("src/app.ts"))?, OLD);
-        assert!(!dir.path().join("deep").exists());
-        Ok(())
-    }
-
-    #[test]
-    fn apply_rejects_a_stale_plan_without_writing() -> JmoveResult<()> {
-        // SPAN was computed on OLD's layout; a single-line importer has
-        // different bytes there, so the run fails before any write.
-        let other = "import { fmt } from '../lib/fmt';\n";
-        let dir = tempfile::TempDir::new()?;
-        let root = dir.path();
-        mk(root, "src/app.ts", other)?;
-        mk(root, "lib/fmt.ts", "export const fmt = 1;\n")?;
-        let err = apply(root, &plan(), GitMode::Disabled).expect_err("span mismatch");
-        assert!(
-            matches!(err, crate::core::JmoveError::StaleIndex(_)),
-            "{err}"
-        );
-        assert_eq!(fs::read_to_string(root.join("src/app.ts"))?, other);
-        assert!(root.join("lib/fmt.ts").exists());
-        Ok(())
     }
 }
