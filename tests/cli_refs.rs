@@ -47,7 +47,7 @@ fn human_dry_run_warns_on_stderr_and_exits_zero() {
     jmove(&tmp, &["mv", "lib/sum.ts", "lib/total.ts", "--dry-run"])
         .success()
         .stderr(
-            predicate::str::contains("non-import reference")
+            predicate::str::contains("3 non-import references to moved files")
                 .and(predicate::str::contains("README.md:1"))
                 .and(predicate::str::contains("__tests__/sum.test.ts:1")),
         );
